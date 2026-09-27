@@ -1,0 +1,15 @@
+# The same job, already run once on each card in the fleet.
+#
+# It is the memory ladder from the flow diagram: precision has already ruled
+# these in, so the only question left is which of them the job fits in.
+#
+# Run seff on each and fill in the table in the chapter. One of them failed.
+#
+#   seff 2001001
+#
+#  card       capacity   job id
+   l4          24 GB     2001001
+   a100_40     40 GB     2001002
+   a100        80 GB     2001003
+   h100        94 GB     2001004
+   pro_6000    96 GB     2001005

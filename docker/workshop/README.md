@@ -1,4 +1,4 @@
-# Introduction to GPUs — exercises
+# Introduction to Using GPUs — exercises
 
 Everything here runs from the **terminal**. In JupyterLab, open one with
 **File → New → Terminal**, then:
@@ -8,21 +8,18 @@ cd ~/gpu-training
 ls
 ```
 
-The chapters are numbered in the order the workshop covers them. Each folder
-holds the scripts for that chapter, and the lesson text for all of them is at
-<https://nesi.github.io/reannz-intro-gpu-workshop/>.
+The folders are numbered in the order the workshop covers them. The lesson text
+is at <https://nesi.github.io/reannz-intro-gpu-workshop/>.
 
 | Folder | Chapter |
 |---|---|
-| `01_requesting_a_gpu` | Asking Slurm for a GPU |
-| `02_did_i_get_a_gpu` | Checking you actually got one |
-| `03_watching_with_nvtop` | Watching a job while it runs |
-| `04_reading_seff` | Reading the report after it finishes |
-| `05_ram_and_vram` | Two kinds of memory, and how much to ask for |
-| `06_how_many_cpus` | How many CPU cores a GPU job needs |
-| `07_splitting_the_work` | Which parts of your work belong on a GPU |
-| `08_precision` | Single and double precision, and what they cost |
-| `09_choosing_a_gpu` | Putting it together: which card to ask for |
+| `06_tools_for_measuring` | A test submit script, and reading it back with `seff` and `profile_plot` |
+| `07_putting_it_together` | The whole loop on one job: watch it, size the card, tune cores and memory |
+| `supplementary` | Optional: checking the GPU is used, precision, splitting CPU/GPU work, CUDA kernels |
+
+Chapters 1 to 5 are read rather than run — they are about deciding what to put
+in a submit script, and the deciding happens before there is anything to
+submit.
 
 ## The commands you will use
 
@@ -50,7 +47,10 @@ What that means in practice:
   about GPU performance.** Nothing in this workshop asks you to time anything,
   and if you find yourself comparing two runs by their wall-clock time, stop —
   that is the one question this environment cannot answer.
-* The emulated card reports **1 GB of VRAM**, not the 24 GB a real L4 has.
+* The node has one of every card on Mahuika — `l4`, `a100_40`, `a100`, `h100`
+  and `pro_6000` — so `--gpus-per-node a100:1` gets you an A100 and asking for
+  a card that is not there is refused, as on the cluster. `sinfo -l` lists them.
+* Each reports **1 GB of VRAM**, not the 24 to 96 GB the real boards have.
   That is deliberate: it makes running out of memory something you can do in
   a few seconds with a tensor that costs the session almost nothing.
 

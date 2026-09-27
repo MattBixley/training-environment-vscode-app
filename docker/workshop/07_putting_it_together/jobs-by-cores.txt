@@ -1,0 +1,16 @@
+# The same job again, on the card you settled on in exercise 2, submitted at
+# five different core counts.
+#
+# Run seff on each and record two numbers: Avg CPU Utilisation, and Peak GPU
+# Utilisation. Then find the smallest core count where GPU utilisation has
+# stopped climbing.
+#
+#   seff 2002003
+#   profile_plot 2002003        # if the average looks wrong, look at the shape
+#
+#  cores   job id
+   1       2002001
+   2       2002002
+   4       2002003
+   8       2002004
+   16      2002005

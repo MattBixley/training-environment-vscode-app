@@ -3,10 +3,10 @@
 
 By this point in the workshop you have measured everything this needs:
 
-  1. Does your software need double precision?     (chapter 8)
-  2. How much VRAM does your work need?            (chapter 5)
-  3. How many CPU cores keep the GPU fed?          (chapter 6)
-  4. What fraction of your runtime is on the GPU?  (chapter 7)
+  1. Does your software need double precision?     (chapter 5)
+  2. How much VRAM does your work need?            (chapter 1)
+  3. How many CPU cores keep the GPU fed?          (chapters 1 and 4)
+  4. What fraction of your runtime is on the GPU?  (chapter 4, and S2)
 
 This walks through them and prints a Slurm request. It is not an oracle - it
 encodes the same reasoning the earlier chapters explained, so that you have
@@ -58,7 +58,7 @@ if vram is None:
     vram = float(
         ask(
             "\n2. How much VRAM does your work need, in GB?\n"
-            "   Chapter 5 shows how to work this out. If you do not know,\n"
+            "   Chapter 1 shows how to work this out. If you do not know,\n"
             "   guess high and measure with seff afterwards.",
             "8",
         )
@@ -70,7 +70,7 @@ if cpus is None:
     cpus = int(
         ask(
             "\n3. How many CPU cores kept the GPU busy?\n"
-            "   Chapter 6 measures this. 2 is a reasonable starting guess.",
+            "   Chapter 4 measures this. 2 is a reasonable starting guess.",
             "2",
         )
     )
@@ -81,7 +81,7 @@ if share is None:
     share = float(
         ask(
             "\n4. What percentage of your runtime is actually on the GPU?\n"
-            "   Chapter 7 measures this, and seff reports it.",
+            "   seff reports this - chapter 4. 60 is a reasonable guess.",
             "60",
         )
     )
@@ -150,7 +150,7 @@ print()
 if share < 40:
     print(f"One warning: only {share:.0f}% of your runtime is on the GPU.")
     print("The GPU will sit idle for most of your allocation, and a faster")
-    print("card cannot fix that. Before you queue this, read chapter 7 again")
+    print("card cannot fix that. Before you queue this, read S2 again")
     print("and see whether the CPU side can be sped up or overlapped instead.")
 else:
     print(f"With {share:.0f}% of your runtime on the GPU, this is a reasonable")

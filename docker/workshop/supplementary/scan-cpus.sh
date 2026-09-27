@@ -30,7 +30,7 @@ for CPUS in 1 2 4; do
         --gpus-per-node l4:1 \
         --time 00:20:00 \
         --output "cpus-${CPUS}-%j.out" \
-        --wrap "python3 ../04_reading_seff/pipeline.py --workers ${CPUS}")
+        --wrap "python3 pipeline.py --workers ${CPUS}")
     echo "submitted ${JOBID} with ${CPUS} CPU(s)"
     JOBIDS+=("${JOBID}")
 done
