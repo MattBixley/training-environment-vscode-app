@@ -47,6 +47,19 @@ echo "TIMING - GPU emulator started at: $(date)"
 mkdir -p "${HOME}/gpu-training"
 rsync --ignore-existing -avz /opt/gpu-training/workshop/ "${HOME}/gpu-training/"
 
+# ---------------------------------------------------------------------------
+# Write the pre-recorded jobs the final chapter compares.
+#
+# Those exercises ask a learner to read ten finished jobs - the same work on
+# five cards, then on five core counts. Running them live would take most of
+# the session, and would be measured against the emulated card, which reports
+# the same memory whatever you ask for. So they are recorded instead: real job
+# records that seff and profile_plot read exactly as they read a job you ran.
+#
+# Existing jobs are left alone, so a restart does not undo anybody's work.
+# ---------------------------------------------------------------------------
+gpuemu-seed-workshop --quiet || echo "WARNING: could not seed the recorded jobs"
+
 echo "TIMING - Starting jupyter at: $(date)"
 
 # launch JupyterLab

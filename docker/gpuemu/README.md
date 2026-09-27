@@ -111,12 +111,34 @@ This is deliberate. Hitting OOM and learning to read it is a large part of what
 a GPU workshop is for, and an emulator with infinite memory would quietly teach
 the opposite of the thing that matters.
 
-`GPUEMU_MEM_TOTAL` shrinks the card — `GPUEMU_MEM_TOTAL=1GiB` gives an L4 with
-1 GB of VRAM. This is the practical way to run a memory-pressure exercise: the
-learner gets a real out-of-memory error from a tensor that costs the host
-almost nothing, instead of the session having to allocate 24 GB to reach the
-limit. The driver's reservation is scaled to the same proportion the real board
-has, so `total`, `used` and `free` stay consistent.
+Cards can be shrunk — `GPUEMU_FLEET=l4:1GiB` gives an L4 with 1 GB of VRAM.
+This is the practical way to run a memory-pressure exercise: the learner gets a
+real out-of-memory error from a tensor that costs the host almost nothing,
+instead of the session having to allocate 24 GB to reach the limit. The
+driver's reservation is scaled to the same proportion the real board has, so
+`total`, `used` and `free` stay consistent.
+
+## A node with more than one kind of card
+
+`GPUEMU_FLEET` lists the node's GPUs as `name[:count][:vram]`, comma separated,
+and they need not all be the same board:
+
+```bash
+GPUEMU_FLEET=l4,a100_40,a100,h100,pro_6000   # one of each, 1 GiB apiece
+GPUEMU_FLEET=l4:4:2GiB,h100:2                # four L4s at 2 GiB, two H100s
+GPUEMU_FLEET=a100:full                       # one A100 at its real 80 GB
+```
+
+A bare number in the second field is a count, so `l4:2` is two cards and
+`l4:2GiB` is one card with 2 GiB. Device order follows the list.
+
+With a mixed fleet, `--gpus-per-node a100:1` means what it says: `sbatch`
+refuses a card the node does not have, the scheduler hands the job a device of
+the type it asked for, and `seff`, `nvidia-smi`, `nvtop` and
+`torch.cuda.get_device_name()` all report that card rather than device 0's.
+
+`GPUEMU_DEVICE`, `GPUEMU_GPUS` and `GPUEMU_MEM_TOTAL` are the older
+single-card spelling, still read when `GPUEMU_FLEET` is unset.
 
 ## Tests
 
@@ -159,7 +181,8 @@ gpuemud --once -v                        # write one frame and exit
 
 ## Adding a device
 
-Add a `DeviceSpec` to `spec.py` and register it in `DEVICES`. Use the real
-board's published figures — learners compare what they see against
-documentation, and round numbers give the game away for no benefit. Select it
-with `GPUEMU_DEVICE=<key>`.
+Add a `DeviceSpec` to `spec.py`, register it in `DEVICES` under the name Slurm
+knows the card as, and add that name to `FLEET`. Use the real board's published
+figures — learners compare what they see against documentation, and round
+numbers give the game away for no benefit. It can then be asked for by name in
+`GPUEMU_FLEET` and in `--gpus-per-node`.

@@ -9,11 +9,15 @@
 # nvidia-smi, nvtop, sbatch, seff, the exercises, PyTorch - behave identically.
 #
 # Usage:
-#   ./run-local.sh                          # defaults, as deployed
-#   ./run-local.sh --device rtxpro6000      # emulate a different card
-#   ./run-local.sh --vram 8GiB --gpus 2     # bigger card, two of them
+#   ./run-local.sh                          # the whole fleet, 1 GiB per card
+#   ./run-local.sh --fleet l4:4:2GiB        # four L4s with 2 GiB each
+#   ./run-local.sh --fleet 'l4,a100:full'   # an L4 and a full-size A100
 #   ./run-local.sh --build                  # build from this checkout first
 #   ./run-local.sh --shell                  # drop to a terminal instead
+#
+# --fleet takes name[:count][:vram] entries, comma separated. A bare number is
+# a count, so l4:2 is two cards and l4:2GiB is one card with 2 GiB. Card names
+# are the ones --gpus-per-node wants: l4, a100_40, a100, h100, pro_6000.
 #
 set -euo pipefail
 
@@ -31,25 +35,31 @@ default_image() {
 
 IMAGE="$(default_image)"
 PORT=8888
-DEVICE="l4"
-VRAM="1GiB"
-GPUS="1"
+# Every card Mahuika has, one of each, deliberately shrunk to 1 GiB so that
+# running out of GPU memory is cheap to demonstrate.
+FLEET="l4,a100_40,a100,h100,pro_6000"
 CPUS="4"
 MEMORY="8g"
 BUILD=0
 SHELL_ONLY=0
+ONE_DEVICE=""
+ONE_VRAM=""
+ONE_COUNT=""
 
 # \s is a GNU extension that BSD sed (macOS) does not understand, so spell the
 # optional space out longhand.
-usage() { sed -n '2,18p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; exit 0; }
+usage() { sed -n '2,21p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; exit 0; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --image)   IMAGE="$2"; shift 2 ;;
         --port)    PORT="$2"; shift 2 ;;
-        --device)  DEVICE="$2"; shift 2 ;;
-        --vram)    VRAM="$2"; shift 2 ;;
-        --gpus)    GPUS="$2"; shift 2 ;;
+        --fleet)   FLEET="$2"; shift 2 ;;
+        # The old single-card spelling, kept so existing notes keep working.
+        # Any of the three switches the node back to one kind of card.
+        --device)  ONE_DEVICE="$2"; shift 2 ;;
+        --vram)    ONE_VRAM="$2"; shift 2 ;;
+        --gpus)    ONE_COUNT="$2"; shift 2 ;;
         --cpus)    CPUS="$2"; shift 2 ;;
         --memory)  MEMORY="$2"; shift 2 ;;
         --build)   BUILD=1; shift ;;
@@ -58,6 +68,13 @@ while [[ $# -gt 0 ]]; do
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+# --device/--vram/--gpus together describe one kind of card, which is what this
+# script used to offer. Any of them replaces the mixed fleet entirely, rather
+# than editing it, so the result does not depend on the order of the arguments.
+if [[ -n "$ONE_DEVICE" || -n "$ONE_VRAM" || -n "$ONE_COUNT" ]]; then
+    FLEET="${ONE_DEVICE:-l4}:${ONE_COUNT:-1}:${ONE_VRAM:-1GiB}"
+fi
 
 if [[ "$BUILD" == "1" ]]; then
     echo "Building from this checkout..."
@@ -92,9 +109,7 @@ COMMON=(
     ${PLATFORM[@]+"${PLATFORM[@]}"}
     --cpus "$CPUS"
     --memory "$MEMORY"
-    -e GPUEMU_DEVICE="$DEVICE"
-    -e GPUEMU_MEM_TOTAL="$VRAM"
-    -e GPUEMU_GPUS="$GPUS"
+    -e GPUEMU_FLEET="$FLEET"
     -e TERM=xterm-256color
 )
 
@@ -107,7 +122,7 @@ cat <<BANNER
 
   Starting the GPU training session locally.
 
-    Emulated GPU : $DEVICE, ${VRAM:-card default} VRAM, x$GPUS
+    Emulated GPUs: $FLEET
     Resources    : $CPUS CPUs, $MEMORY RAM
     Image        : $IMAGE
 
@@ -125,6 +140,7 @@ exec docker run "${COMMON[@]}" -p "${PORT}:8888" "$IMAGE" bash -lc '
     # you see locally has the same contents as the deployed one.
     mkdir -p "${HOME}/gpu-training"
     rsync --ignore-existing -a /opt/gpu-training/workshop/ "${HOME}/gpu-training/"
+    gpuemu-seed-workshop --quiet || true
 
     nvidia-smi -L
     echo

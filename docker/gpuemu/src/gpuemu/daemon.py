@@ -234,9 +234,13 @@ class _DeviceSim:
 
 class Daemon:
     def __init__(self, state_file: Path | None = None, verbose: bool = False):
-        self.dev = spec.selected_device()
-        self.n_gpus = spec.device_count()
-        self.sims = [_DeviceSim(i, self.dev) for i in range(self.n_gpus)]
+        # One spec per device rather than one for the node: the fleet may mix
+        # card types, and a job's utilisation, power and thermals have to come
+        # from the board it was actually given.
+        self.fleet = spec.fleet()
+        self.dev = self.fleet[0]
+        self.n_gpus = len(self.fleet)
+        self.sims = [_DeviceSim(i, d) for i, d in enumerate(self.fleet)]
         self.writer = StateWriter(state_file)
         self.samples: dict[str, _ClaimSample] = {}
         self.verbose = verbose
@@ -340,8 +344,8 @@ class Daemon:
         return max(0.0, min(100.0, smoothed))
 
     def _build_state(self, index: int, claims: list[tuple[dict, float]], dt: float) -> GPUState:
-        d = self.dev
         sim = self.sims[index]
+        d = sim.dev
 
         claimed_mem = sum(int(c.get("memory", 0)) for c, _ in claims)
         raw_util = sum(u for _, u in claims)
@@ -461,8 +465,11 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, daemon.stop)
 
     if args.verbose:
+        cards = ", ".join(
+            f"{i}: {d.gres_name} ({d.mem_total_mib} MiB)" for i, d in enumerate(daemon.fleet)
+        )
         print(
-            f"gpuemud: {daemon.n_gpus}x {daemon.dev.name}, "
+            f"gpuemud: {daemon.n_gpus} GPU(s) [{cards}], "
             f"state={daemon.writer.path}, cpus={daemon.cpus:.1f}",
             file=sys.stderr,
         )

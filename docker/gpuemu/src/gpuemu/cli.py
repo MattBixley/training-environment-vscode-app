@@ -116,8 +116,14 @@ def cmd_restart(args) -> int:
 
 
 def cmd_status(args) -> int:
-    dev = spec.selected_device()
-    print(f"Emulated device : {dev.name} x{spec.device_count()}")
+    try:
+        fleet = spec.fleet()
+    except SystemExit as exc:
+        print(f"Emulated devices: MISCONFIGURED - {exc}")
+        fleet = []
+    for i, d in enumerate(fleet):
+        label = "Emulated devices:" if i == 0 else " " * 17
+        print(f"{label} [{i}] {d.gres_name:<10} {d.name} ({d.mem_total_mib} MiB)")
     print(f"State file      : {default_state_file()}")
     print(f"Claims dir      : {client.claims_dir()}")
     print(f"Slurm dir       : {slurm_dir()}")

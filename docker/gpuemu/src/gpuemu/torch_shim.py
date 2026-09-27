@@ -85,11 +85,18 @@ def install(torch=None) -> None:
         _INSTALLED = True
         return
 
-    dev = spec.selected_device()
-    n_devices = spec.device_count() if visible is None else len(visible)
-    claim = client.process_claim(device=0, util="auto")
+    # One spec per device torch can see, in torch's index order. On a node with
+    # mixed cards, torch.cuda.get_device_name(0) has to name the card this job
+    # was given, not whatever sits at physical index 0.
+    try:
+        node = spec.fleet()
+    except SystemExit:
+        node = [spec.selected_device()]
+    physical = list(range(len(node))) if visible is None else list(visible)
+    devices = [node[i] if 0 <= i < len(node) else node[0] for i in physical] or [node[0]]
+    claim = client.process_claim(util="auto")
 
-    _patch_cuda_namespace(torch, dev, n_devices, claim)
+    _patch_cuda_namespace(torch, devices, physical, claim)
     _patch_placement(torch, claim)
     if _spoof_device():
         _patch_device_property(torch)
@@ -215,15 +222,18 @@ def _tensor_bytes(t) -> int:
 # ------------------------------------------------------------ cuda namespace
 
 
-def _patch_cuda_namespace(torch, dev: spec.DeviceSpec, n_devices: int, claim) -> None:
+def _patch_cuda_namespace(
+    torch, devices: list[spec.DeviceSpec], physical: list[int], claim
+) -> None:
     ledger = _MemoryLedger(claim)
     torch.cuda._gpuemu_ledger = ledger
     current = {"index": 0}
+    n_devices = len(devices)
 
     class _DeviceProperties:
         """Stands in for torch.cuda's device properties struct."""
 
-        def __init__(self):
+        def __init__(self, dev: spec.DeviceSpec, uuid_index: int):
             self.name = dev.name
             self.major = dev.cc_major
             self.minor = dev.cc_minor
@@ -234,7 +244,9 @@ def _patch_cuda_namespace(torch, dev: spec.DeviceSpec, n_devices: int, claim) ->
             self.max_threads_per_multi_processor = 1536
             self.warp_size = 32
             self.L2_cache_size = 48 * 1024 * 1024
-            self.uuid = spec.make_uuid(0)
+            # The UUID belongs to the physical card, not to torch's index into
+            # the ones it can see.
+            self.uuid = spec.make_uuid(uuid_index)
 
         def __repr__(self):
             return (
@@ -244,8 +256,6 @@ def _patch_cuda_namespace(torch, dev: spec.DeviceSpec, n_devices: int, claim) ->
                 f"multi_processor_count={self.multi_processor_count})"
             )
 
-    props = _DeviceProperties()
-
     def _index(device=None) -> int:
         if device is None:
             return current["index"]
@@ -253,6 +263,19 @@ def _patch_cuda_namespace(torch, dev: spec.DeviceSpec, n_devices: int, claim) ->
             return device
         idx = getattr(device, "index", None)
         return 0 if idx is None else idx
+
+    props = [
+        _DeviceProperties(d, physical[i] if i < len(physical) else i)
+        for i, d in enumerate(devices)
+    ]
+
+    def _spec_for(device=None) -> spec.DeviceSpec:
+        idx = _index(device)
+        return devices[idx] if 0 <= idx < n_devices else devices[0]
+
+    def _props_for(device=None):
+        idx = _index(device)
+        return props[idx] if 0 <= idx < n_devices else props[0]
 
     class _Stream:
         """A no-op stream. Ordering is trivially satisfied when work is synchronous."""
@@ -318,10 +341,13 @@ def _patch_cuda_namespace(torch, dev: spec.DeviceSpec, n_devices: int, claim) ->
         "device_count": lambda: n_devices,
         "current_device": lambda: current["index"],
         "set_device": lambda d: current.__setitem__("index", _index(d)),
-        "get_device_name": lambda device=None: dev.name,
-        "get_device_capability": lambda device=None: (dev.cc_major, dev.cc_minor),
-        "get_device_properties": lambda device=None: props,
-        "get_arch_list": lambda: [f"sm_{dev.cc_major}{dev.cc_minor}"],
+        "get_device_name": lambda device=None: _spec_for(device).name,
+        "get_device_capability": lambda device=None: (
+            _spec_for(device).cc_major,
+            _spec_for(device).cc_minor,
+        ),
+        "get_device_properties": lambda device=None: _props_for(device),
+        "get_arch_list": lambda: sorted({f"sm_{d.cc_major}{d.cc_minor}" for d in devices}),
         "get_device_index": _index,
         "synchronize": lambda device=None: None,
         "empty_cache": lambda: None,
@@ -334,8 +360,13 @@ def _patch_cuda_namespace(torch, dev: spec.DeviceSpec, n_devices: int, claim) ->
         "reset_peak_memory_stats": lambda device=None: ledger.reset_peak(),
         "reset_max_memory_allocated": lambda device=None: ledger.reset_peak(),
         "mem_get_info": lambda device=None: (
-            max(0, dev.mem_total_bytes - dev.mem_reserved_bytes - ledger.allocated),
-            dev.mem_total_bytes,
+            max(
+                0,
+                _spec_for(device).mem_total_bytes
+                - _spec_for(device).mem_reserved_bytes
+                - ledger.allocated,
+            ),
+            _spec_for(device).mem_total_bytes,
         ),
         "device": _device_ctx,
         "Stream": _Stream,
@@ -361,7 +392,7 @@ def _patch_cuda_namespace(torch, dev: spec.DeviceSpec, n_devices: int, claim) ->
             "|---------------------------------------------------------------------------|\n"
             f"| Allocated memory      | {ledger.allocated // mib:>8} MiB                          |\n"
             f"| Peak allocated        | {ledger.peak // mib:>8} MiB                          |\n"
-            f"| Device total          | {dev.mem_total_bytes // mib:>8} MiB                          |\n"
+            f"| Device total          | {_spec_for(device).mem_total_bytes // mib:>8} MiB                          |\n"
             "|===========================================================================|"
         )
 

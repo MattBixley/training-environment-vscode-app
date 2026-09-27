@@ -51,7 +51,7 @@ def _do_claim() -> None:
     from . import client
 
     try:
-        client.process_claim(device=0, util="auto")
+        client.process_claim(util="auto")
     except Exception:
         # The emulator must never be the reason a learner's import fails.
         pass

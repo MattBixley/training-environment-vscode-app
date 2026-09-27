@@ -160,11 +160,18 @@ ENV GPUEMU_STATE_FILE=/run/gpuemu/state.bin
 ENV GPUEMU_CLAIMS_DIR=/run/gpuemu/claims
 ENV GPUEMU_SLURM_DIR=/run/gpuemu/slurm
 
-# Default the emulated card to 1 GB of VRAM. A small card is what makes memory
+# The node's GPUs: one of every card Mahuika has, so `--gpus-per-node a100:1`
+# and `--gpus-per-node l4:1` are genuinely different requests and choosing
+# between cards is something a learner can do here rather than only read about.
+# The app form overrides this; entries are name[:count][:vram].
+#
+# Each is deliberately shrunk to 1 GB of VRAM. A small card is what makes memory
 # pressure teachable: a learner hits a real out-of-memory error with a tensor
 # that costs the session almost nothing, rather than needing to allocate tens of
-# gigabytes of host RAM to reach the limit. The app form overrides this, and an
-# empty value means "report the real board's size".
+# gigabytes of host RAM to reach the limit. Say `l4:full` for the real 24 GB.
+ENV GPUEMU_FLEET=l4,a100_40,a100,h100,pro_6000
+
+# The older single-card spelling, still read when GPUEMU_FLEET is unset.
 ENV GPUEMU_MEM_TOTAL=1GiB
 
 # Install the autoclaim hook into every Python process.

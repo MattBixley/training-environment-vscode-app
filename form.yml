@@ -4,9 +4,11 @@ cluster: "my-k8s-cluster"
 form:
   - cpu
   - memory
-  - gpu_model
-  - gpu_vram
-  - gpu_count
+  - vram_l4
+  - vram_a100_40
+  - vram_a100
+  - vram_h100
+  - vram_pro_6000
   - wall_time
 
 attributes:
@@ -17,56 +19,73 @@ attributes:
   cpu: 4
   memory: 8
 
-  gpu_model:
+  # One control per card in Mahuika's fleet. The session's node presents every
+  # card you leave switched on, so `--gpus-per-node a100:1` and
+  # `--gpus-per-node l4:1` are different requests that get different devices -
+  # which is what makes "choose the right card" something a learner can do here
+  # rather than only read about. Asking for a card you switched off is refused
+  # by sbatch, the same way the cluster refuses a card the partition lacks.
+  #
+  # **No physical GPU is involved.** All computation runs on the CPU; what each
+  # card changes is the model name, memory size, clocks and power envelope that
+  # nvidia-smi, nvtop, seff and PyTorch report.
+  #
+  # The default of 1 GB per card is deliberate. A small card is the practical
+  # way to teach memory pressure: a learner hits a genuine out-of-memory error
+  # with a tensor that costs the session almost nothing, so batch-sizing and
+  # OOM-recovery exercises work without the session needing tens of gigabytes of
+  # real RAM to fill. "Full size" reports the real board's figure instead -
+  # choose it when the reported size is itself the point.
+  vram_l4:
     widget: select
-    label: "Emulated GPU"
+    label: "NVIDIA L4 - GPU memory"
     help: |
-      Which card the session pretends to have. This changes the model name,
-      memory size, clocks and power envelope reported by nvidia-smi and nvtop.
-      **No physical GPU is involved either way** - all computation runs on the CPU.
-    options:
-      - ["NVIDIA L4 (24 GB)", "l4"]
-      - ["NVIDIA A100 (40 GB)", "a100"]
-      - ["NVIDIA H100 (80 GB)", "h100"]
-      - ["NVIDIA RTX PRO 6000 Blackwell (96 GB)", "rtxpro6000"]
-    value: "l4"
-
-  gpu_vram:
-    widget: select
-    label: "GPU memory"
-    help: |
-      How much device memory the emulated card reports.
-
-      The default of 1&nbsp;GB is deliberate. A small card is the practical way
-      to teach memory pressure: a learner hits a genuine out-of-memory error
-      with a tensor that costs the session almost nothing, so batch-sizing and
-      OOM-recovery exercises work without the session needing tens of gigabytes
-      of real RAM to fill.
-
-      **Card default** reports the real board's figure instead (24 GB for an
-      L4, 96 GB for an RTX PRO 6000). Choose it when the workshop does not
-      cover memory, or when the reported size itself is the point.
-    options:
+      The 24&nbsp;GB L4, requested as `--gpus-per-node l4:1`. This is the card
+      the workshop exercises use, so switching it off will break them.
+    options: &vram_options
       - ["1 GiB (default)", "1GiB"]
       - ["512 MiB", "512MiB"]
       - ["2 GiB", "2GiB"]
       - ["4 GiB", "4GiB"]
       - ["8 GiB", "8GiB"]
-      - ["Card default (full size)", ""]
+      - ["Full size (the real board)", "full"]
+      - ["Not on this node", "off"]
     value: "1GiB"
 
-  gpu_count:
+  vram_a100_40:
     widget: select
-    label: "Number of GPUs"
+    label: "NVIDIA A100 40 GB - GPU memory"
     help: |
-      How many emulated devices to present. Use more than one to teach device
-      selection and `CUDA_VISIBLE_DEVICES`; the scheduler will allocate them to
-      jobs independently.
-    options:
-      - ["1", "1"]
-      - ["2", "2"]
-      - ["4", "4"]
-    value: "1"
+      The 40&nbsp;GB A100, requested as `--gpus-per-node a100_40:1`. The Slurm
+      name is provisional until these nodes are in service.
+    options: *vram_options
+    value: "1GiB"
+
+  vram_a100:
+    widget: select
+    label: "NVIDIA A100 80 GB - GPU memory"
+    help: |
+      The 80&nbsp;GB A100, requested as `--gpus-per-node a100:1`. The only card
+      in the fleet built for double precision.
+    options: *vram_options
+    value: "1GiB"
+
+  vram_h100:
+    widget: select
+    label: "NVIDIA H100 NVL - GPU memory"
+    help: |
+      The 94&nbsp;GB H100 NVL, requested as `--gpus-per-node h100:1`.
+    options: *vram_options
+    value: "1GiB"
+
+  vram_pro_6000:
+    widget: select
+    label: "NVIDIA RTX PRO 6000 - GPU memory"
+    help: |
+      The 96&nbsp;GB RTX PRO 6000 Blackwell, requested as
+      `--gpus-per-node pro_6000:1`.
+    options: *vram_options
+    value: "1GiB"
 
   wall_time:
     widget: number_field

@@ -106,9 +106,23 @@ def node_memory_mb() -> int:
 
 
 def node_gpus() -> int:
+    return len(node_gres())
+
+
+def node_gres() -> list[str]:
+    """The Slurm name of each GPU on this node, by device index.
+
+    ``["l4", "a100", "h100"]`` means device 0 is an L4 and asking for
+    ``--gpus-per-node a100:1`` must get you device 1 and nothing else.
+
+    A bad ``GPUEMU_FLEET`` raises rather than reporting an empty node. Silently
+    having no GPUs would turn a typo in the session's configuration into "your
+    job asked for a card that does not exist", which sends whoever hits it off
+    debugging their submit script instead of the setting that is actually wrong.
+    """
     from . import spec
 
-    return spec.device_count()
+    return spec.fleet_gres()
 
 
 # ---------------------------------------------------------------- job model
@@ -140,6 +154,12 @@ class Job:
     reason: str = "None"
     qos: str = ""
 
+    # --profile task / --acctg-freq. Profiling writes a time series to
+    # profiles/<jobid>.csv so profile_plot has something to draw; without it a
+    # job records only the summary figures seff needs.
+    profile: str = ""
+    acctg_freq: int = 30
+
     # What the job actually used, for seff. CPU time and peak RSS come from
     # wait4() when the job ends (see jobacct.py); the GPU figures have to be
     # sampled while it runs, because utilisation is a rate and there is nothing
@@ -149,6 +169,18 @@ class Job:
     gpu_util_sum: float = 0.0
     gpu_util_samples: int = 0
     gpu_mem_peak_mb: float = 0.0
+
+    # Which card the job asked for, and how much memory that card has.
+    #
+    # gpu_type is set for any job that named a card - `--gpus-per-node a100:1`
+    # records "a100" - and is what the scheduler matches against the node's
+    # devices. gpu_total_mb is left unset for jobs run here, where seff asks the
+    # device it was given instead. It exists so that pre-recorded workshop jobs
+    # can report the cluster's real cards: a lesson about picking between a
+    # 24 GB L4 and an 80 GB A100 cannot be taught on devices deliberately shrunk
+    # to 1 GB so that out-of-memory errors are cheap to reach.
+    gpu_type: str = ""
+    gpu_total_mb: float = 0.0
 
     @property
     def mean_gpu_util(self) -> float:
@@ -286,23 +318,40 @@ def parse_memory(value: str) -> int:
     return int(num * {"": 1, "K": 1 / 1024, "M": 1, "G": 1024, "T": 1024 * 1024}[m.group(2)])
 
 
+def parse_gres_request(value: str) -> tuple[str, int]:
+    """``--gres=gpu:l4:2`` -> ``("l4", 2)``; ``--gres=gpu:2`` -> ``("", 2)``.
+
+    An empty type means "any card will do", which is what leaving the name out
+    means to Slurm.
+    """
+    for item in value.split(","):
+        bits = [b.strip() for b in item.strip().split(":")]
+        if not bits or bits[0] != "gpu":
+            continue
+        if len(bits) == 1:
+            return "", 1
+        if len(bits) == 2:
+            return "", int(bits[1])
+        return bits[1].lower(), int(bits[2])
+    return "", 0
+
+
+def parse_gpu_request(value: str) -> tuple[str, int]:
+    """``--gpus-per-node=l4:1`` -> ``("l4", 1)``; ``=1`` -> ``("", 1)``."""
+    bits = [b.strip() for b in str(value).strip().split(":")]
+    if len(bits) == 1:
+        return "", int(bits[0])
+    return bits[0].lower(), int(bits[-1])
+
+
 def parse_gres(value: str) -> int:
     """``--gres=gpu:2`` or ``--gres=gpu:l4:2`` -> 2."""
-    for item in value.split(","):
-        bits = item.strip().split(":")
-        if bits and bits[0] == "gpu":
-            if len(bits) == 1:
-                return 1
-            return int(bits[-1])
-    return 0
+    return parse_gres_request(value)[1]
 
 
 def parse_gpus(value: str) -> int:
     """``--gpus-per-node=1`` or ``=l4:1`` -> 1."""
-    value = value.strip()
-    if ":" in value:
-        return int(value.split(":")[-1])
-    return int(value)
+    return parse_gpu_request(value)[1]
 
 
 def _sbatch_parser() -> argparse.ArgumentParser:
@@ -333,9 +382,103 @@ def _sbatch_parser() -> argparse.ArgumentParser:
     # write `--qos debug` for a quick test, and a script that errors out on the
     # flag it was just told to use teaches the opposite.
     ap.add_argument("-q", "--qos", default=None)
+    # --profile task is acted on: it turns on the per-second time series that
+    # profile_plot draws. --acctg-freq sets how often that series is sampled.
     ap.add_argument("--profile", default=None)
+    ap.add_argument("--acctg-freq", default=None)
     ap.add_argument("-h", "--help", action="store_true")
     return ap
+
+
+def _job_pids(root_pid: int) -> list[int]:
+    """The job's process and everything descended from it.
+
+    A job script is a shell, and the work happens in a child of it. Sampling
+    only the top process reports the shell's few kilobytes and none of the
+    program's, which is how the first version of this drew a job using two
+    cores and 500 MB as a flat line at zero. Slurm accounts the whole step for
+    the same reason.
+    """
+    children: dict[int, list[int]] = {}
+    try:
+        entries = [int(p.name) for p in Path("/proc").iterdir() if p.name.isdigit()]
+    except OSError:
+        return [root_pid]
+    for pid in entries:
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+            ppid = int(stat.rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            continue
+        children.setdefault(ppid, []).append(pid)
+
+    found, stack = [], [root_pid]
+    while stack:
+        pid = stack.pop()
+        if pid in found:
+            continue
+        found.append(pid)
+        stack.extend(children.get(pid, ()))
+    return found
+
+
+def _proc_sample(job: "Job") -> tuple[float, float, float, float]:
+    """Live CPU, memory and I/O for a running job, read from /proc.
+
+    Returns (rss_mb, cpus_in_use, read_mb, write_mb), summed over the job's
+    whole process tree. Anything unreadable contributes zero rather than
+    raising: a missing sample should leave a gap in the graph, not kill the
+    scheduler.
+    """
+    rss = ticks = read_mb = write_mb = 0.0
+    if not job.pid:
+        return rss, 0.0, read_mb, write_mb
+
+    for pid in _job_pids(job.pid):
+        try:
+            for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines():
+                if line.startswith("VmRSS:"):
+                    rss += float(line.split()[1]) / 1024
+                    break
+        except OSError:
+            pass
+        try:
+            for line in Path(f"/proc/{pid}/io").read_text(encoding="utf-8").splitlines():
+                if line.startswith("read_bytes:"):
+                    read_mb += float(line.split()[1]) / (1024 * 1024)
+                elif line.startswith("write_bytes:"):
+                    write_mb += float(line.split()[1]) / (1024 * 1024)
+        except OSError:
+            pass
+        try:
+            fields = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+            ticks += float(fields[11]) + float(fields[12])
+        except (OSError, IndexError, ValueError):
+            pass
+
+    hz = os.sysconf("SC_CLK_TCK") or 100
+    elapsed = max(1e-6, time.time() - job.start_time)
+    # Mean cores busy since the job started, capped at what it was allocated.
+    cpus = min(float(job.cpus), (ticks / hz) / elapsed)
+    return rss, cpus, read_mb, write_mb
+
+
+def _acctg_seconds(raw: str | None) -> int:
+    """Seconds between profile samples, from whatever --acctg-freq was given.
+
+    Slurm accepts a bare number, ``task=1``, or a comma-separated list such as
+    ``energy=60,task=1``. Only the task interval matters here, and a learner who
+    copies any of those forms out of the documentation should not get an error,
+    so we take the task value if it is named and the first number otherwise.
+    """
+    if not raw:
+        return 30  # Slurm's default for --profile task
+    text = str(raw)
+    named = re.search(r"task\s*=\s*(\d+)", text)
+    if named:
+        return max(1, int(named.group(1)))
+    bare = re.search(r"(\d+)", text)
+    return max(1, int(bare.group(1))) if bare else 30
 
 
 def read_sbatch_directives(script_path: Path) -> list[str]:
@@ -424,14 +567,26 @@ def sbatch(argv: list[str] | None = None) -> int:
     name = merged.job_name or (script_path.name if script_path else "wrap")
 
     gpus = 0
-    if merged.gres:
-        gpus = parse_gres(merged.gres)
-    if merged.gpus_per_node:
-        gpus = max(gpus, parse_gpus(merged.gpus_per_node))
-    if merged.gpus:
-        gpus = max(gpus, parse_gpus(str(merged.gpus)))
-    if merged.gpus_per_task:
-        gpus = max(gpus, parse_gpus(merged.gpus_per_task) * (merged.ntasks or 1))
+    gpu_type = ""
+    try:
+        for raw, multiplier in (
+            (merged.gres, 1),
+            (merged.gpus_per_node, 1),
+            (str(merged.gpus) if merged.gpus else None, 1),
+            (merged.gpus_per_task, merged.ntasks or 1),
+        ):
+            if not raw:
+                continue
+            parse = parse_gres_request if raw is merged.gres else parse_gpu_request
+            kind, count = parse(raw)
+            gpus = max(gpus, count * multiplier)
+            gpu_type = gpu_type or kind
+    except ValueError:
+        print(
+            "sbatch: error: Invalid generic resource (gres) specification",
+            file=sys.stderr,
+        )
+        return 1
 
     cpus = merged.cpus_per_task or 1
     try:
@@ -451,12 +606,26 @@ def sbatch(argv: list[str] | None = None) -> int:
         print(f"sbatch: error: invalid --time: {exc}", file=sys.stderr)
         return 1
 
-    # Reject what cannot be run, rather than queueing it forever.
-    if gpus > node_gpus():
+    # Reject what cannot be run, rather than queueing it forever. Naming a card
+    # the node does not have is the interesting case: on a cluster that is a
+    # typo or a copied script, and Slurm refuses it at submit rather than
+    # leaving the job pending until someone notices.
+    gres = node_gres()
+    available = [g for g in gres if not gpu_type or g == gpu_type] if gpus else gres
+    if gpus and gpu_type and gpu_type not in gres:
         print(
             f"sbatch: error: Batch job submission failed: Requested node "
-            f"configuration is not available ({gpus} GPUs requested, "
-            f"{node_gpus()} on {NODE_NAME})",
+            f"configuration is not available (no {gpu_type!r} GPU on {NODE_NAME}; "
+            f"it has {', '.join(sorted(set(gres))) or 'none'})",
+            file=sys.stderr,
+        )
+        return 1
+    if gpus > len(available):
+        detail = f"{gpu_type} " if gpu_type else ""
+        print(
+            f"sbatch: error: Batch job submission failed: Requested node "
+            f"configuration is not available ({gpus} {detail}GPUs requested, "
+            f"{len(available)} on {NODE_NAME})",
             file=sys.stderr,
         )
         return 1
@@ -499,6 +668,9 @@ def sbatch(argv: list[str] | None = None) -> int:
         time_limit_s=time_limit,
         reason="None",
         qos=merged.qos or "",
+        profile=merged.profile or "",
+        acctg_freq=_acctg_seconds(merged.acctg_freq),
+        gpu_type=gpu_type,
     )
     store.save(job)
     if merged.parsable:
@@ -648,6 +820,25 @@ def sinfo(argv: list[str] | None = None) -> int:
     if used_cpus >= node_cpus():
         state = "alloc"
 
+    if args.long or args.Node:
+        # Which cards the node has, in the spelling --gpus-per-node wants. On a
+        # cluster this is how you find out what there is to ask for without
+        # reading the documentation.
+        counts: dict[str, int] = {}
+        for name in node_gres():
+            counts[name] = counts.get(name, 0) + 1
+        gres = ",".join(f"gpu:{k}:{v}" for k, v in counts.items()) or "(null)"
+        if not args.noheader:
+            print(
+                f"{'NODELIST':<14}{'NODES':<7}{'PARTITION':<12}{'STATE':<7}"
+                f"{'CPUS':<6}{'MEMORY':<9}GRES"
+            )
+        print(
+            f"{NODE_NAME:<14}{1:<7}{PARTITION + '*':<12}{state:<7}"
+            f"{node_cpus():<6}{node_memory_mb():<9}{gres}"
+        )
+        return 0
+
     if not args.noheader:
         print(f"{'PARTITION':<12}{'AVAIL':<7}{'TIMELIMIT':<11}{'NODES':<7}{'STATE':<7}NODELIST")
     print(f"{PARTITION + '*':<12}{'up':<7}{'7-00:00:00':<11}{1:<7}{state:<7}{NODE_NAME}")
@@ -731,13 +922,14 @@ def _seff_pct(label: str, pct: float, detail: str = "") -> str:
     return f"{row}  {detail}".rstrip()
 
 
-def _device_total_gb() -> float:
-    """Capacity of the emulated card, in GB, for the GPU memory line.
+def _device_total_gb(index: int = 0) -> float:
+    """Capacity of emulated device ``index``, in GB, for the GPU memory line.
 
     The real seff looks the board size up in a static per-partition table. Here
     we ask the device, because the emulated card's memory is configurable and a
     learner who reads "of 23 GB" while nvidia-smi says 1024MiB has been taught
-    to distrust the tool.
+    to distrust the tool. The index matters once the node holds more than one
+    kind of card: a job given the H100 must be measured against the H100.
     """
     try:
         from .shm import StateReader
@@ -746,15 +938,22 @@ def _device_total_gb() -> float:
         if reader is not None:
             try:
                 snap = reader.read()
+                if index < len(snap.gpus):
+                    return snap.gpus[index].mem_total / (1024**3)
                 if snap.gpus:
                     return snap.gpus[0].mem_total / (1024**3)
             finally:
                 reader.close()
     except (OSError, ValueError):
         pass
-    from .spec import selected_device
+    from . import spec
 
-    return selected_device().mem_total_mib / 1024
+    try:
+        devices = spec.fleet()
+    except SystemExit:
+        return spec.selected_device().mem_total_mib / 1024
+    dev = devices[index] if index < len(devices) else devices[0]
+    return dev.mem_total_mib / 1024
 
 
 _SEFF_USAGE = """Usage: seff [Options] <JobID>
@@ -819,7 +1018,14 @@ def _seff_one(job: Job, show_cluster: bool) -> None:
     if not job.gpus:
         return
 
-    alloc_gb = _device_total_gb() * max(1, len(job.gpu_ids))
+    # A job that recorded its own card reports against that; anything run here
+    # is measured against the devices it was actually given.
+    if job.gpu_total_mb:
+        alloc_gb = job.gpu_total_mb / 1024
+    elif job.gpu_ids:
+        alloc_gb = sum(_device_total_gb(i) for i in job.gpu_ids)
+    else:
+        alloc_gb = _device_total_gb() * max(1, job.gpus)
     print(_seff_pct("Peak GPU Utilisation:", job.mean_gpu_util))
     print(
         _seff_pct(
@@ -991,7 +1197,10 @@ def scontrol(argv: list[str] | None = None) -> int:
             print(f"   RunTime={format_duration(j.elapsed)} TimeLimit={format_duration(j.time_limit_s)}")
             print(f"   Partition={j.partition} NodeList={NODE_NAME if j.state == RUNNING else '(null)'}")
             print(f"   NumNodes=1 NumCPUs={j.cpus} NumTasks={j.ntasks} CPUs/Task={j.cpus}")
-            print(f"   TRES=cpu={j.cpus},mem={j.mem_mb}M,gres/gpu={j.gpus}")
+            tres = f"cpu={j.cpus},mem={j.mem_mb}M,gres/gpu={j.gpus}"
+            if j.gpu_type:
+                tres += f",gres/gpu:{j.gpu_type}={j.gpus}"
+            print(f"   TRES={tres}")
             print(f"   WorkDir={j.workdir}")
             print(f"   StdOut={j.stdout}")
             print(f"   StdErr={j.stderr}")
@@ -1017,12 +1226,31 @@ def srun(argv: list[str] | None = None) -> int:
         return 1
 
     gpus = 0
-    if args.gres:
-        gpus = parse_gres(args.gres)
-    if args.gpus_per_node:
-        gpus = max(gpus, parse_gpus(args.gpus_per_node))
-    if args.gpus:
-        gpus = max(gpus, parse_gpus(str(args.gpus)))
+    gpu_type = ""
+    try:
+        if args.gres:
+            gpu_type, gpus = parse_gres_request(args.gres)
+        for raw in (args.gpus_per_node, str(args.gpus) if args.gpus else None):
+            if not raw:
+                continue
+            kind, count = parse_gpu_request(raw)
+            gpus = max(gpus, count)
+            gpu_type = gpu_type or kind
+    except ValueError:
+        print("srun: error: Invalid generic resource (gres) specification", file=sys.stderr)
+        return 1
+
+    # Pick devices of the type asked for, so an interactive `srun --gpus-per-node
+    # h100:1` hands you an H100 rather than whichever card happens to be first.
+    gres = node_gres()
+    matching = [i for i, g in enumerate(gres) if not gpu_type or g == gpu_type]
+    if gpus and gpu_type and not matching:
+        print(
+            f"srun: error: Unable to allocate resources: no {gpu_type!r} GPU on "
+            f"{NODE_NAME} (it has {', '.join(sorted(set(gres))) or 'none'})",
+            file=sys.stderr,
+        )
+        return 1
 
     env = dict(os.environ)
     env.update(
@@ -1032,7 +1260,7 @@ def srun(argv: list[str] | None = None) -> int:
             user=_current_user(),
             cpus=args.cpus_per_task or 1,
             mem_mb=1024,
-            gpu_ids=list(range(gpus)),
+            gpu_ids=matching[:gpus],
             ntasks=args.ntasks or 1,
             workdir=os.getcwd(),
         )
@@ -1100,6 +1328,7 @@ class Scheduler:
         self._acc: dict[int, dict[str, float]] = {}
         self._reader = None
         self._last_flush = 0.0
+        self._profile_last: dict[int, float] = {}
 
     def stop(self, *_):
         self._stop = True
@@ -1130,6 +1359,43 @@ class Scheduler:
         self._flush_samples()
 
     # -- accounting --------------------------------------------------
+
+    def profile_dir(self) -> Path:
+        d = self.store.root / "profiles"
+        d.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(d, 0o1777)
+        except OSError:
+            pass
+        return d
+
+    def _write_profile_row(self, job: Job, util: float, mem_mb: float) -> None:
+        """Append one sample to the job's time series.
+
+        Only jobs submitted with --profile task get one, matching Slurm: the
+        series is what profile_plot draws, and writing it for every job would
+        cost something for no reason.
+        """
+        if not job.profile:
+            return
+        last = self._profile_last.get(job.job_id, 0.0)
+        now = time.time()
+        if now - last < max(1, job.acctg_freq):
+            return
+        self._profile_last[job.job_id] = now
+        path = self.profile_dir() / f"{job.job_id}.csv"
+        new_file = not path.exists()
+        try:
+            rss, cpus, read_mb, write_mb = _proc_sample(job)
+            with path.open("a", encoding="utf-8") as fh:
+                if new_file:
+                    fh.write("t,cpus,rss_mb,read_mb,write_mb,gpu_util,gpu_mem_mb\n")
+                fh.write(
+                    f"{now - job.start_time:.1f},{cpus:.2f},{rss:.1f},"
+                    f"{read_mb:.1f},{write_mb:.1f},{util / 100:.3f},{mem_mb:.1f}\n"
+                )
+        except OSError:
+            pass
 
     def usage_dir(self) -> Path:
         d = self.store.root / "usage"
@@ -1179,9 +1445,11 @@ class Scheduler:
                 mem_mb += gpu.mem_used / (1024 * 1024)
             if not utils:
                 continue
-            acc["util_sum"] += sum(utils) / len(utils)
+            mean_util = sum(utils) / len(utils)
+            acc["util_sum"] += mean_util
             acc["n"] += 1
             acc["mem_peak"] = max(acc["mem_peak"], mem_mb)
+            self._write_profile_row(job, mean_util, mem_mb)
 
     def _apply_samples(self, job: Job) -> None:
         acc = self._acc.get(job.job_id)
@@ -1298,8 +1566,17 @@ class Scheduler:
             return
         used_cpus, used_mem, used_gpus = self._used()
 
+        gres = node_gres()
         for job in pending:
-            free_gpus = [i for i in range(self.total_gpus) if i not in used_gpus]
+            # A job that named a card can only have that card. Without this the
+            # scheduler would hand an A100 job whatever was free, and the
+            # exercise that compares cards would compare nothing.
+            free_gpus = [
+                i
+                for i in range(self.total_gpus)
+                if i not in used_gpus
+                and (not job.gpu_type or (i < len(gres) and gres[i] == job.gpu_type))
+            ]
             if job.cpus + used_cpus > self.total_cpus:
                 self._mark_reason(job, "Resources")
                 continue

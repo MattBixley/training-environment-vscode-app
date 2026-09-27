@@ -86,10 +86,9 @@ fails with a genuine out-of-memory error. Hitting OOM and learning to read it
 is a large part of what a GPU workshop is for, and an emulator with infinite
 memory would quietly teach the opposite.
 
-That capacity defaults to **1 GB**, not the board's real size — see
-`gpu_vram` under [Session options](#session-options). A small card is what
-makes the exercise affordable: filling a real 24 GB card would cost 24 GB of
-host RAM per session.
+That capacity defaults to **1 GB per card**, not the board's real size — see
+[Session options](#session-options). A small card is what makes the exercise
+affordable: filling a real 24 GB card would cost 24 GB of host RAM per session.
 
 ### PyTorch
 
@@ -172,8 +171,8 @@ that absence is the diagnosis for "why was my GPU job so slow?".
 ## Repository layout
 
 ```
-form.yml               session options: CPUs, memory, GPU model and count, wall time
-submit.yml.erb         k8s pod spec; passes GPUEMU_DEVICE / GPUEMU_GPUS through
+form.yml               session options: CPUs, memory, per-card GPU memory, wall time
+submit.yml.erb         k8s pod spec; composes GPUEMU_FLEET from the form
 template/script.sh.erb starts the emulator, copies the material, launches JupyterLab
 docker/Dockerfile      the session image
 docker/gpuemu/         the emulator (see docker/gpuemu/README.md)
@@ -182,37 +181,42 @@ docker/workshop/       the exercises, copied to ~/gpu-training/
 
 ## Session options
 
-`gpu_model` chooses which card is presented:
+The session's node presents **every card on Mahuika at once**, one of each:
 
-| Option | Reports as | Memory | Notes |
+| Slurm name | Reports as | Memory | Notes |
 |---|---|---|---|
-| `l4` | NVIDIA L4 | 24 GB | default; passive, 72 W; fp64 at 1/62 of fp32 |
+| `l4` | NVIDIA L4 | 24 GB | passive, 72 W; fp64 at 1/62 of fp32 |
+| `a100_40` | NVIDIA A100-PCIE-40GB | 40 GB | Ampere, 250 W; fp64 at 1/2. Slurm name provisional |
 | `a100` | NVIDIA A100-SXM4-80GB | 80 GB | Ampere, 400 W; fp64 at 1/2 |
 | `h100` | NVIDIA H100 NVL | 94 GB | Hopper, 400 W; fp64 at 1/2 |
-| `rtxpro6000` | NVIDIA RTX PRO 6000 Blackwell Server Edition | 96 GB | Blackwell, 600 W, PCIe Gen5, cc 12.0; fp64 at 1/63 |
+| `pro_6000` | NVIDIA RTX PRO 6000 Blackwell Server Edition | 96 GB | Blackwell, 600 W, PCIe Gen5, cc 12.0; fp64 at 1/63 |
+
+So `--gpus-per-node a100:1` and `--gpus-per-node l4:1` are genuinely different
+requests that get different devices, and asking for a card the node does not
+have is refused by `sbatch` the way the cluster refuses one the partition
+lacks. `sinfo -l` lists what there is. Each card changes the reported name,
+memory, clocks, power envelope and compute capability, and nothing else; no
+configuration is any more or less real than the others.
 
 These match the cards on the cluster rather than the nearest generic part, so
 a learner comparing what they see here against the hardware documentation
-finds the same VRAM figures and the same Slurm names (`l4`, `a100`, `h100`,
-`pro_6000`).
+finds the same VRAM figures and the same Slurm names.
 
-It changes the reported name, memory, clocks, power envelope and compute
-capability, and nothing else; no configuration is any more or less real than
-the others.
+The form has one **GPU memory** control per card. It sets how much device
+memory that card reports, and **defaults to 1 GB** rather than the board's real
+size. That is deliberate: a small card is what makes memory pressure teachable,
+since a learner hits a genuine out-of-memory error with a tensor that costs the
+session almost nothing. Filling a real 24 GB card would need 24 GB of host RAM
+per session.
 
-`gpu_vram` sets how much device memory the card reports, and **defaults to
-1 GB** rather than the board's real size. That is deliberate: a small card is
-what makes memory pressure teachable, since a learner hits a genuine
-out-of-memory error with a tensor that costs the session almost nothing.
-Filling a real 24 GB card would need 24 GB of host RAM per session.
+Choose **Full size** when the workshop does not cover memory, or when the
+reported capacity is itself the point — comparing an L4 against an RTX PRO
+6000, say. Choose **Not on this node** to leave a card out entirely.
 
-Choose **Card default (full size)** when the workshop does not cover memory, or
-when the reported capacity is itself the point — comparing an L4 against an RTX
-PRO 6000, say.
-
-`gpu_count` presents 1, 2 or 4 devices, which is how to teach device selection
-and `CUDA_VISIBLE_DEVICES`. The scheduler allocates them to jobs
-independently.
+For more than one of a card — which is how to teach device selection and
+`CUDA_VISIBLE_DEVICES` — set `GPUEMU_FLEET` directly; see the
+[configuration reference](#configuration-reference). The scheduler allocates
+devices to jobs independently.
 
 CPU and memory default to 4 cores and 8 GB. Do not reduce the CPU allocation
 much below that: emulated GPU utilisation is derived from real CPU use, so on
@@ -229,8 +233,8 @@ This starts the same image the cluster runs and prints a JupyterLab URL. Docker
 is the only requirement.
 
 ```bash
-./run-local.sh --device rtxpro6000 --vram ""   # a different card, full size
-./run-local.sh --gpus 2                        # two devices
+./run-local.sh --fleet 'l4,a100:full'          # an L4 and a full-size A100
+./run-local.sh --fleet l4:4:2GiB               # four L4s with 2 GiB each
 ./run-local.sh --shell                         # a terminal instead of JupyterLab
 ./run-local.sh --build                         # build from this checkout first
 ```
@@ -292,14 +296,31 @@ Read by the emulator at startup; set in `submit.yml.erb` or the Dockerfile.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `GPUEMU_DEVICE` | `l4` | Card to emulate: `l4`, `a100`, `h100`, `rtxpro6000` |
-| `GPUEMU_MEM_TOTAL` | `1GiB` | Device memory; empty means the real board's size |
-| `GPUEMU_GPUS` | `1` | How many devices to present (max 8) |
+| `GPUEMU_FLEET` | the whole fleet | The node's GPUs; see below |
+| `GPUEMU_DEVICE` | `l4` | One card, when `GPUEMU_FLEET` is unset |
+| `GPUEMU_MEM_TOTAL` | `1GiB` | Its memory; empty means the real board's size |
+| `GPUEMU_GPUS` | `1` | How many of it to present (max 8) |
 | `GPUEMU_UTIL_GAIN` | `1.0` | Scales derived utilisation; raise if jobs look idle |
 | `GPUEMU_AUTOCLAIM` | `1` | Claim the device when a process imports torch or numba.cuda |
 | `GPUEMU_TORCH_SPOOF_DEVICE` | unset | Make `tensor.device` report `cuda:0` |
 | `GPUEMU_STATE_FILE` | `/run/gpuemu/state.bin` | Where device state lives |
 | `NUMBA_ENABLE_CUDASIM` | `1` | Run `@cuda.jit` kernels in the simulator |
+
+`GPUEMU_FLEET` is a comma-separated list of `name[:count][:vram]`, and is what
+lets the node hold more than one kind of card. A bare number in the second
+field is a count, so `l4:2` is two cards and `l4:2GiB` is one card with 2 GiB.
+`full` means the board's real capacity. Device order follows the list, so the
+first entry is device 0.
+
+```bash
+GPUEMU_FLEET=l4,a100_40,a100,h100,pro_6000   # the default: one of each, 1 GiB
+GPUEMU_FLEET=l4:4:2GiB,h100:2                # four L4s at 2 GiB, two H100s
+GPUEMU_FLEET=a100:full                       # one A100 at its real 80 GB
+```
+
+At most 8 devices; the state file has no room for more. A name the emulator
+does not know, or a fleet that will not fit, fails at startup rather than
+quietly presenting something else.
 
 ## Troubleshooting
 

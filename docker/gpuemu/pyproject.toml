@@ -30,6 +30,11 @@ srun = "gpuemu.slurm:srun"
 seff = "gpuemu.slurm:seff"
 svisit = "gpuemu.slurm:svisit"
 gpuemu-jobacct = "gpuemu.jobacct:main"
+# Slurm native profiling: --profile task records a time series, and this
+# draws it, as profile_plot does on the cluster.
+profile_plot = "gpuemu.profile:main"
+# Writes the pre-recorded jobs the final chapter compares.
+gpuemu-seed-workshop = "gpuemu.seed:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

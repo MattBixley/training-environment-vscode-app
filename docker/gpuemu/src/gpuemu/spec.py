@@ -1,12 +1,25 @@
-"""The device we pretend to be, and the physical behaviour we pretend it has.
+"""The devices we pretend to be, and the physical behaviour we pretend they have.
 
 Defaults describe an NVIDIA L4: Ada Lovelace AD104, 24 GB GDDR6, 72 W, PCIe
 Gen4 x16, passively cooled. The numbers are the ones a real L4 reports, because
 learners will compare what they see here against documentation and against a
 real cluster, and round numbers would give the game away for no benefit.
 
-Set ``GPUEMU_DEVICE`` to one of the keys in ``DEVICES`` to emulate something
-else, or ``GPUEMU_GPUS`` to a count to pretend there are several.
+Two ways to say what the node has:
+
+``GPUEMU_FLEET`` describes the whole node, and may mix card types - which is
+what lets ``--gpus-per-node a100:1`` mean something different from
+``--gpus-per-node l4:1``. Entries are ``name[:count][:vram]``, comma separated::
+
+    GPUEMU_FLEET=l4,a100_40,a100,h100,pro_6000   one of each, 1 GiB apiece
+    GPUEMU_FLEET=l4:4:2GiB,h100:2                four L4s at 2 GiB, two H100s
+    GPUEMU_FLEET=a100:full                       one A100 at its real 80 GB
+
+A bare number in the second field is a count, so ``l4:2`` is two cards and
+``l4:2GiB`` is one card with 2 GiB. ``full`` means the board's real capacity.
+
+``GPUEMU_DEVICE`` / ``GPUEMU_GPUS`` / ``GPUEMU_MEM_TOTAL`` are the older, single
+card type spelling, and still work when ``GPUEMU_FLEET`` is unset.
 """
 
 from __future__ import annotations
@@ -190,6 +203,34 @@ A100_80GB = replace(
     host_mem_gb_per_node=512,
 )
 
+# The 40 GB A100s arriving on Mahuika: nine of them, three to a node. Three to
+# a node rules out the SXM4 board, which comes four or eight at a time, so this
+# describes the PCIe part.
+#
+# Two things here are not yet confirmed with NeSI and will need correcting when
+# they are: the board type above, and `gres_name` - `a100_40` is a placeholder
+# for whatever Slurm ends up calling it. It has to differ from `a100`, because
+# the whole point of the card is that it is a different size.
+A100_40GB = replace(
+    A100_80GB,
+    name="NVIDIA A100-PCIE-40GB",
+    mem_total_mib=40960,
+    mem_reserved_mib=512,
+    # HBM2 rather than the 80 GB board's HBM2e: same width, lower clock.
+    max_clock_mem_mhz=1215,
+    power_limit_w=250.0,
+    power_idle_w=35.0,
+    power_min_limit_w=100.0,
+    pci_device_id=0x20F110DE,  # GA100 [A100 PCIe 40GB]
+    pci_subsys_id=0x145F10DE,
+    mem_bandwidth_gbps=1555.0,
+    # Same die as the 80 GB card, so the arithmetic rates are identical. Only
+    # the memory differs - which is exactly the choice the workshop teaches.
+    vram_gb=40,
+    gres_name="a100_40",
+    max_per_node=3,
+)
+
 H100_NVL = replace(
     L4,
     name="NVIDIA H100 NVL",
@@ -272,23 +313,38 @@ RTX_PRO_6000 = replace(
     host_mem_gb_per_node=768,
 )
 
+# Keyed by the name Slurm knows the card as, so that the string a learner types
+# in `--gpus-per-node` is the string that selects the device here. `rtxpro6000`
+# is kept alongside `pro_6000` because it is what GPUEMU_DEVICE has always
+# taken; both spell the same board.
 DEVICES = {
     "l4": L4,
+    "a100_40": A100_40GB,
     "a100": A100_80GB,
     "h100": H100_NVL,
+    "pro_6000": RTX_PRO_6000,
     "rtxpro6000": RTX_PRO_6000,
 }
 
 # Fleet order for anything that prints a comparison: cheapest and smallest
-# first, which is also the order a researcher should try them in.
-FLEET = ("l4", "a100", "h100", "rtxpro6000")
+# first, which is also the order a researcher should try them in. One entry per
+# distinct board, so iterating this never yields the same card twice.
+FLEET = ("l4", "a100_40", "a100", "h100", "pro_6000")
 
-# Back-compatible aliases. The A100 and H100 definitions were originally the
-# PCIe parts; they now describe the SXM4-80GB and NVL boards this cluster
-# actually has, because a workshop that teaches the wrong VRAM figure teaches
-# the wrong request.
-A100_40GB = A100_80GB
+# Back-compatible alias. The H100 definition was originally the PCIe part; it
+# now describes the NVL board this cluster actually has, because a workshop
+# that teaches the wrong VRAM figure teaches the wrong request.
 H100_PCIE = H100_NVL
+
+# A deliberately small card is the cheapest way to teach memory pressure: on a
+# 1 GB device a learner hits a real out-of-memory error with a tensor that costs
+# the host almost nothing, so the exercise works without the session needing
+# 24 GB of RAM to fill. Every card in a fleet gets this unless told otherwise.
+DEFAULT_VRAM = "1GiB"
+
+# The state file has room for this many devices; see MAX_GPUS in shm.py and the
+# matching constant in nvml/gpuemu_shm.h.
+MAX_DEVICES = 8
 
 # Reported by nvidia-smi and NVML. Pinned to a real driver/CUDA pairing so that
 # version checks in learners' code behave the way they would on the cluster.
@@ -308,6 +364,20 @@ def _parse_mib(text: str) -> int:
     return max(1, int(float(raw) * multiplier))
 
 
+def _resize(dev: DeviceSpec, total_mib: int) -> DeviceSpec:
+    """The same board with a different amount of memory soldered to it.
+
+    The driver's reservation stays at the proportion the real board has (~2.3%
+    on an L4), so "total" and "free" stay plausible against each other.
+    """
+    ratio = dev.mem_reserved_mib / dev.mem_total_mib
+    return replace(
+        dev,
+        mem_total_mib=total_mib,
+        mem_reserved_mib=max(1, round(total_mib * ratio)),
+    )
+
+
 def selected_device() -> DeviceSpec:
     key = os.environ.get("GPUEMU_DEVICE", "l4").strip().lower()
     try:
@@ -316,10 +386,6 @@ def selected_device() -> DeviceSpec:
         known = ", ".join(sorted(DEVICES))
         raise SystemExit(f"GPUEMU_DEVICE={key!r} is not one of: {known}") from None
 
-    # A deliberately small card is the cheapest way to teach memory pressure:
-    # on a 1 GB device a learner hits a real out-of-memory error with a tensor
-    # that costs the host almost nothing, so the exercise works without the
-    # session needing 24 GB of RAM to fill.
     override = os.environ.get("GPUEMU_MEM_TOTAL", "").strip()
     if override:
         try:
@@ -328,23 +394,87 @@ def selected_device() -> DeviceSpec:
             raise SystemExit(
                 f"GPUEMU_MEM_TOTAL={override!r} is not a size like '1GiB' or '512MiB'"
             ) from None
-        # Keep the driver's reservation at the same proportion the real board
-        # has (~2.3% on an L4), so "total" and "free" stay plausible.
-        ratio = dev.mem_reserved_mib / dev.mem_total_mib
-        dev = replace(
-            dev,
-            mem_total_mib=total_mib,
-            mem_reserved_mib=max(1, round(total_mib * ratio)),
-        )
+        dev = _resize(dev, total_mib)
     return dev
 
 
-def device_count() -> int:
+def _sized(key: str, vram: str) -> DeviceSpec:
+    """One card of type ``key``, with ``vram`` memory on it."""
+    try:
+        dev = DEVICES[key]
+    except KeyError:
+        known = ", ".join(FLEET)
+        raise SystemExit(
+            f"GPUEMU_FLEET: {key!r} is not a GPU type. Known types: {known}"
+        ) from None
+    if vram.lower() in {"full", "card", "default"}:
+        return dev
+    try:
+        return _resize(dev, _parse_mib(vram))
+    except ValueError:
+        raise SystemExit(
+            f"GPUEMU_FLEET: {vram!r} is not a size like '1GiB', '512MiB' or 'full'"
+        ) from None
+
+
+def parse_fleet(text: str) -> list[DeviceSpec]:
+    """``l4:2:1GiB,h100:full`` -> the devices that node has, in order.
+
+    Each entry is ``name[:count][:vram]``. A bare number in the second field is
+    a count, so ``l4:2`` is two cards and ``l4:2GiB`` is one card with 2 GiB.
+    """
+    out: list[DeviceSpec] = []
+    for item in text.split(","):
+        bits = [b.strip() for b in item.strip().split(":") if b.strip()]
+        if not bits:
+            continue
+        key, rest = bits[0].lower(), bits[1:]
+        count = 1
+        if rest and rest[0].isdigit():
+            count = int(rest.pop(0))
+        vram = rest[0] if rest else DEFAULT_VRAM
+        out.extend([_sized(key, vram)] * max(0, count))
+    return out
+
+
+def fleet() -> list[DeviceSpec]:
+    """Every device on this node, indexed the way CUDA_VISIBLE_DEVICES indexes them.
+
+    A heterogeneous list is the point: a node holding an L4 and an A100 is what
+    makes choosing between them something a learner can actually do here, rather
+    than read about.
+    """
+    raw = os.environ.get("GPUEMU_FLEET", "").strip()
+    devices = parse_fleet(raw) if raw else []
+    if not devices:
+        # No fleet asked for (or one that named no cards): fall back to the
+        # single-card spelling, which is what every earlier session used.
+        devices = [selected_device()] * _configured_count()
+    if len(devices) > MAX_DEVICES:
+        raise SystemExit(
+            f"GPUEMU_FLEET asks for {len(devices)} GPUs, and the state file holds "
+            f"at most {MAX_DEVICES}. Drop a card, or lower a count: entries are "
+            "name[:count][:vram], so 'l4:2' is two cards and 'l4:2GiB' is one."
+        )
+    return devices
+
+
+def fleet_gres() -> list[str]:
+    """The Slurm name of each device, by index."""
+    return [d.gres_name for d in fleet()]
+
+
+def _configured_count() -> int:
     try:
         n = int(os.environ.get("GPUEMU_GPUS", "1"))
     except ValueError:
         return 1
-    return max(1, min(n, 8))
+    return max(1, min(n, MAX_DEVICES))
+
+
+def device_count() -> int:
+    """How many devices this node presents."""
+    return len(fleet())
 
 
 def make_uuid(index: int) -> str:

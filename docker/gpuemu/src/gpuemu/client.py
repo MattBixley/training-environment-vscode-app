@@ -89,6 +89,18 @@ def visible_devices() -> list[int] | None:
     return out
 
 
+def default_device() -> int:
+    """The device this process should claim when it does not say which.
+
+    The first device Slurm gave it, not device 0. Those are the same thing only
+    on a node whose GPUs are interchangeable; once the node holds an L4 and an
+    A100, a job allocated the A100 that claimed device 0 would show up in nvtop
+    against somebody else's card, and its own would read as idle.
+    """
+    visible = visible_devices()
+    return visible[0] if visible else 0
+
+
 def parse_size(value: str | int | float) -> int:
     """Turn ``"2GiB"``, ``"512M"`` or a plain number of bytes into bytes."""
     if isinstance(value, (int, float)):
@@ -271,7 +283,11 @@ def device_capacity(device: int) -> int:
             pass
         finally:
             reader.close()
-    dev = spec.selected_device()
+    try:
+        devices = spec.fleet()
+    except SystemExit:
+        devices = [spec.selected_device()]
+    dev = devices[device] if 0 <= device < len(devices) else devices[0]
     return dev.mem_total_bytes - dev.mem_reserved_bytes
 
 
@@ -324,7 +340,7 @@ _process_claim_lock = threading.Lock()
 
 
 def process_claim(
-    device: int = 0,
+    device: int | None = None,
     name: str | None = None,
     util: UtilSpec = "auto",
 ) -> Claim:
@@ -335,6 +351,8 @@ def process_claim(
     context does, rather than one per library.
     """
     global _process_claim
+    if device is None:
+        device = default_device()
     with _process_claim_lock:
         if _process_claim is None:
             _process_claim = Claim(device=device, name=name, util=util).open()

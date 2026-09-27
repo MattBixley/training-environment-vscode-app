@@ -9,6 +9,21 @@
    user = OodSupport::User.new
 
    services_node = Resolv.getaddress("servicesnode")
+
+   # The node's GPUs, one form control per card. "off" leaves the card out
+   # entirely, so asking for it is refused rather than quietly satisfied by
+   # whatever else is free. Falls back to a single L4 if every card is off,
+   # because a session with no GPU at all is never what anyone meant.
+   fleet = {
+     "l4"       => vram_l4,
+     "a100_40"  => vram_a100_40,
+     "a100"     => vram_a100,
+     "h100"     => vram_h100,
+     "pro_6000" => vram_pro_6000,
+   }.reject { |_, vram| vram.to_s.strip.empty? || vram.to_s.strip == "off" }
+    .map { |card, vram| "#{card}:#{vram}" }
+    .join(",")
+   fleet = "l4:1GiB" if fleet.empty?
 %>
 ---
 script:
@@ -22,7 +37,7 @@ script:
       # `k8s_container` does NOT control it - that value only tells the pod
       # pre-puller which image to cache on the worker nodes. Bump both together
       # on every release; CI enforces it on tag builds.
-      image: "ghcr.io/nesi/training-environment-jupyter-gpu-app:v0.3.1"
+      image: "ghcr.io/nesi/training-environment-jupyter-gpu-app:v0.4.0"
       command: ["/bin/bash","-l","<%= staged_root %>/job_script_content.sh"]
       working_dir: "<%= Etc.getpwnam(ENV['USER']).dir %>"
       restart_policy: 'OnFailure'
@@ -33,13 +48,11 @@ script:
         HOME: "<%= user.home %>"
         LOG_DIR: "<%= staged_root %>"
         SHELL: "/bin/bash"
-        # Which card the emulator presents, and how many. Read by gpuemud at
-        # startup; see gpuemu/spec.py for the device definitions.
-        GPUEMU_DEVICE: "<%= gpu_model %>"
-        GPUEMU_GPUS: "<%= gpu_count %>"
-        # Empty means "use the real board's memory size". Set to something
-        # small (1GiB) for a workshop that teaches memory pressure.
-        GPUEMU_MEM_TOTAL: "<%= gpu_vram %>"
+        # Which cards the node presents, and how much memory each one has.
+        # Entries are name[:count][:vram]; read by gpuemud at startup, and by
+        # sbatch to decide whether a requested card exists. See gpuemu/spec.py
+        # for the device definitions.
+        GPUEMU_FLEET: "<%= fleet %>"
       port: "8080"
       cpu: "<%= cpu %>"
       memory: "<%= memory %>Gi"
