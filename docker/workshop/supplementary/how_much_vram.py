@@ -59,7 +59,10 @@ print()
 
 blocks = []
 mb = 0
-step_mb = max(32, int(total_gb * 1024 / 16))
+# Sixteen or so steps before it fills, whatever size the card is. The floor is
+# small because the emulated cards are: 32 MB steps on a 100 MB card would
+# reach the limit in three, which shows the error but not the approach to it.
+step_mb = max(4, int(total_gb * 1024 / 16))
 
 try:
     while True:

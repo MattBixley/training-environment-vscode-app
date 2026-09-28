@@ -52,18 +52,26 @@ def host_ram_mb():
 if not torch.cuda.is_available():
     raise SystemExit("No GPU visible. Add '#SBATCH --gpus-per-node l4:1'.")
 
-total_vram = torch.cuda.get_device_properties(0).total_memory / 1024**3
+total_vram_mb = torch.cuda.get_device_properties(0).total_memory / 1024**2
 print(f"GPU: {torch.cuda.get_device_name(0)}")
-print(f"VRAM on this card: {total_vram:.1f} GB")
+if total_vram_mb >= 1024:
+    print(f"VRAM on this card: {total_vram_mb / 1024:.1f} GB")
+else:
+    print(f"VRAM on this card: {total_vram_mb:.0f} MB")
 print()
 print(f"{'':<34}{'RAM (MB)':>12}{'VRAM (MB)':>12}")
 print("-" * 58)
 print(f"{'at the start':<34}{host_ram_mb():>12}{vram_used_mb():>12}")
 
-# --- allocate 256 MB of ordinary RAM ------------------------------------
+# --- allocate a block of ordinary RAM -----------------------------------
 # A numpy-style host array. The GPU knows nothing about this.
-host_block = torch.zeros(64 * 1024 * 1024, dtype=torch.float32)  # 256 MB
-print(f"{'after 256 MB in RAM':<34}{host_ram_mb():>12}{vram_used_mb():>12}")
+#
+# Sized to fit the card, because the whole point of the script is to move it
+# there afterwards. The emulated cards are deliberately small, so a fixed
+# block big enough to be interesting on a real board would simply fail here.
+BLOCK_MB = max(8, min(32, int(total_vram_mb / 3)))
+host_block = torch.zeros(BLOCK_MB * 262144, dtype=torch.float32)
+print(f"{f'after {BLOCK_MB} MB in RAM':<34}{host_ram_mb():>12}{vram_used_mb():>12}")
 print("   ^ RAM went up. VRAM did not move: the GPU cannot see this data.")
 print()
 

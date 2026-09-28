@@ -23,6 +23,7 @@ from gpuemu.slurm import (
     COMPLETED,
     JobStore,
     Scheduler,
+    _seff_capacity,
     node_gres,
     parse_gpu_request,
     parse_gres_request,
@@ -70,7 +71,7 @@ def test_fleet_string_decides_what_the_node_has(monkeypatch, text, expected):
 @pytest.mark.parametrize(
     "text,mib",
     [
-        ("l4", 1024),  # 1 GiB unless told otherwise
+        ("l4", 100),  # DEFAULT_VRAM unless told otherwise
         ("l4:2GiB", 2048),
         ("l4:4:512MiB", 512),
         ("l4:full", 23034),  # the real board
@@ -85,7 +86,7 @@ def test_cards_keep_their_own_sizes(monkeypatch):
     """Switching one card to full size must not resize the others."""
     monkeypatch.setenv("GPUEMU_FLEET", "l4,a100:full,h100:4GiB")
     sizes = {d.gres_name: d.mem_total_mib for d in spec.fleet()}
-    assert sizes == {"l4": 1024, "a100": 81920, "h100": 4096}
+    assert sizes == {"l4": 100, "a100": 81920, "h100": 4096}
 
 
 def test_an_unknown_card_names_the_ones_that_exist(monkeypatch):
@@ -272,3 +273,34 @@ def test_seff_measures_against_the_card_the_job_ran_on(monkeypatch, tmp_path, ca
     assert job.gpu_ids == [1]
     assert seff([str(job.job_id)]) == 0
     assert "of 4 GB" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "gb,expected",
+    [
+        (40.0, "40 GB"),
+        (1.0, "1 GB"),
+        (100 / 1024, "100 MB"),  # the default card
+        (0.5, "512 MB"),
+    ],
+)
+def test_a_small_card_is_reported_in_megabytes(gb, expected):
+    """A 100 MB card rounded to whole GB reads as "of 0 GB"."""
+    assert _seff_capacity(gb) == expected
+
+
+def test_seff_does_not_measure_against_a_zero_byte_card(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("GPUEMU_FLEET", "l4:100MiB")
+    script = tmp_path / "job.sl"
+    script.write_text("#!/bin/bash\n#SBATCH --gpus-per-node l4:1\ntrue\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert sbatch([str(script)]) == 0
+
+    store = JobStore()
+    _run_to_completion(store)
+    capsys.readouterr()
+
+    assert seff([str(store.all()[0].job_id)]) == 0
+    out = capsys.readouterr().out
+    assert "of 100 MB" in out
+    assert "of 0 GB" not in out

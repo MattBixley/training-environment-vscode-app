@@ -116,7 +116,10 @@ major, minor = torch.cuda.get_device_capability(0)
 print(f"  compute capability:    {major}.{minor}")
 
 total = torch.cuda.get_device_properties(0).total_memory
-print(f"  device memory (VRAM):  {total / 1024**3:.1f} GB")
+if total >= 1024**3:
+    print(f"  device memory (VRAM):  {total / 1024**3:.1f} GB")
+else:
+    print(f"  device memory (VRAM):  {total / 1024**2:.0f} MB")
 
 # Prove it end to end, rather than trusting a flag.
 x = torch.ones(1000, 1000, device="cuda")

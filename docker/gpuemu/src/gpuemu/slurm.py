@@ -911,6 +911,20 @@ def _seff_bytes(kbytes: float) -> str:
     return "%.2f %sB" % (kbytes / mul**exp, prefix)
 
 
+def _seff_capacity(gb: float) -> str:
+    """A card's size for the GPU memory line: ``40 GB``, or ``100 MB`` if small.
+
+    The real seff always says GB, because every board on a cluster is measured
+    in them. Cards here are deliberately shrunk so that running out of memory
+    is cheap to demonstrate, and a 100 MB card rounded to whole GB reads as
+    "of 0 GB" - which tells a learner their job filled a card that does not
+    exist.
+    """
+    if gb >= 1:
+        return f"{gb:.0f} GB"
+    return f"{gb * 1024:.0f} MB"
+
+
 def _seff_pct(label: str, pct: float, detail: str = "") -> str:
     """``Label:  99%  detail``.
 
@@ -1031,7 +1045,7 @@ def _seff_one(job: Job, show_cluster: bool) -> None:
         _seff_pct(
             "Peak GPU Memory Util:",
             (100 * job.gpu_mem_peak_mb / (alloc_gb * 1024)) if alloc_gb else 0.0,
-            f"{_seff_bytes(job.gpu_mem_peak_mb * 1024)} of {alloc_gb:.0f} GB",
+            f"{_seff_bytes(job.gpu_mem_peak_mb * 1024)} of {_seff_capacity(alloc_gb)}",
         )
     )
 

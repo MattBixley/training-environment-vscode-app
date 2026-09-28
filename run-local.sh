@@ -73,7 +73,7 @@ done
 # script used to offer. Any of them replaces the mixed fleet entirely, rather
 # than editing it, so the result does not depend on the order of the arguments.
 if [[ -n "$ONE_DEVICE" || -n "$ONE_VRAM" || -n "$ONE_COUNT" ]]; then
-    FLEET="${ONE_DEVICE:-l4}:${ONE_COUNT:-1}:${ONE_VRAM:-1GiB}"
+    FLEET="${ONE_DEVICE:-l4}:${ONE_COUNT:-1}:${ONE_VRAM:-100MiB}"
 fi
 
 if [[ "$BUILD" == "1" ]]; then

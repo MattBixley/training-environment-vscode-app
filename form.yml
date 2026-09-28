@@ -30,12 +30,17 @@ attributes:
   # card changes is the model name, memory size, clocks and power envelope that
   # nvidia-smi, nvtop, seff and PyTorch report.
   #
-  # The default of 1 GB per card is deliberate. A small card is the practical
+  # The default of 100 MB per card is deliberate. A small card is the practical
   # way to teach memory pressure: a learner hits a genuine out-of-memory error
   # with a tensor that costs the session almost nothing, so batch-sizing and
   # OOM-recovery exercises work without the session needing tens of gigabytes of
   # real RAM to fill. "Full size" reports the real board's figure instead -
   # choose it when the reported size is itself the point.
+  #
+  # Emulated VRAM is accounted rather than reserved, so the cards cost nothing
+  # until a tensor is actually made. A filled card does cost that much host
+  # memory though, which is why the figure is small: the whole fleet held at
+  # once is half a gigabyte of the session's 8 GB rather than five.
   vram_l4:
     widget: select
     label: "NVIDIA L4 - GPU memory"
@@ -43,14 +48,15 @@ attributes:
       The 24&nbsp;GB L4, requested as `--gpus-per-node l4:1`. This is the card
       the workshop exercises use, so switching it off will break them.
     options: &vram_options
-      - ["1 GiB (default)", "1GiB"]
+      - ["100 MiB (default)", "100MiB"]
+      - ["256 MiB", "256MiB"]
       - ["512 MiB", "512MiB"]
+      - ["1 GiB", "1GiB"]
       - ["2 GiB", "2GiB"]
       - ["4 GiB", "4GiB"]
-      - ["8 GiB", "8GiB"]
       - ["Full size (the real board)", "full"]
       - ["Not on this node", "off"]
-    value: "1GiB"
+    value: "100MiB"
 
   vram_a100_40:
     widget: select
@@ -59,7 +65,7 @@ attributes:
       The 40&nbsp;GB A100, requested as `--gpus-per-node a100_40:1`. The Slurm
       name is provisional until these nodes are in service.
     options: *vram_options
-    value: "1GiB"
+    value: "100MiB"
 
   vram_a100:
     widget: select
@@ -68,7 +74,7 @@ attributes:
       The 80&nbsp;GB A100, requested as `--gpus-per-node a100:1`. The only card
       in the fleet built for double precision.
     options: *vram_options
-    value: "1GiB"
+    value: "100MiB"
 
   vram_h100:
     widget: select
@@ -76,7 +82,7 @@ attributes:
     help: |
       The 94&nbsp;GB H100 NVL, requested as `--gpus-per-node h100:1`.
     options: *vram_options
-    value: "1GiB"
+    value: "100MiB"
 
   vram_pro_6000:
     widget: select
@@ -85,7 +91,7 @@ attributes:
       The 96&nbsp;GB RTX PRO 6000 Blackwell, requested as
       `--gpus-per-node pro_6000:1`.
     options: *vram_options
-    value: "1GiB"
+    value: "100MiB"
 
   wall_time:
     widget: number_field

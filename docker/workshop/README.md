@@ -50,7 +50,7 @@ What that means in practice:
 * The node has one of every card on Mahuika — `l4`, `a100_40`, `a100`, `h100`
   and `pro_6000` — so `--gpus-per-node a100:1` gets you an A100 and asking for
   a card that is not there is refused, as on the cluster. `sinfo -l` lists them.
-* Each reports **1 GB of VRAM**, not the 24 to 96 GB the real boards have.
+* Each reports **100 MB of VRAM**, not the 24 to 96 GB the real boards have.
   That is deliberate: it makes running out of memory something you can do in
   a few seconds with a tensor that costs the session almost nothing.
 
