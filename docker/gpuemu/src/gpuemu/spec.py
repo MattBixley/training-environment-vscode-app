@@ -337,16 +337,22 @@ FLEET = ("l4", "a100_40", "a100", "h100", "pro_6000")
 H100_PCIE = H100_NVL
 
 # A deliberately small card is the cheapest way to teach memory pressure: on a
-# 100 MB device a learner hits a real out-of-memory error with a tensor that
+# 200 MB device a learner hits a real out-of-memory error with a tensor that
 # costs the host almost nothing, so the exercise works without the session
 # needing 24 GB of RAM to fill. Every card in a fleet gets this unless told
 # otherwise.
 #
+# 200 rather than 100 for headroom. The largest exercise holds 64 MB, and on a
+# 100 MB card that left 34 MB spare - enough for the material as it stands and
+# not much else. It also fitted only because the torch shim accounts tensors
+# placed on the device rather than the intermediates that operations produce:
+# a real card doing `x = x @ x.T` on 64 MB holds both at once.
+#
 # The figure is per card, and the node holds five of them. Emulated VRAM is
 # accounted rather than reserved - nothing is allocated until a tensor is
 # actually created - but a filled card does cost that much host memory, so the
-# whole fleet at once is half a gigabyte rather than five.
-DEFAULT_VRAM = "100MiB"
+# whole fleet at once is a gigabyte of the session's eight rather than five.
+DEFAULT_VRAM = "200MiB"
 
 # The state file has room for this many devices; see MAX_GPUS in shm.py and the
 # matching constant in nvml/gpuemu_shm.h.

@@ -912,11 +912,11 @@ def _seff_bytes(kbytes: float) -> str:
 
 
 def _seff_capacity(gb: float) -> str:
-    """A card's size for the GPU memory line: ``40 GB``, or ``100 MB`` if small.
+    """A card's size for the GPU memory line: ``40 GB``, or ``200 MB`` if small.
 
     The real seff always says GB, because every board on a cluster is measured
     in them. Cards here are deliberately shrunk so that running out of memory
-    is cheap to demonstrate, and a 100 MB card rounded to whole GB reads as
+    is cheap to demonstrate, and a 200 MB card rounded to whole GB reads as
     "of 0 GB" - which tells a learner their job filled a card that does not
     exist.
     """

@@ -71,7 +71,7 @@ def test_fleet_string_decides_what_the_node_has(monkeypatch, text, expected):
 @pytest.mark.parametrize(
     "text,mib",
     [
-        ("l4", 100),  # DEFAULT_VRAM unless told otherwise
+        ("l4", 200),  # DEFAULT_VRAM unless told otherwise
         ("l4:2GiB", 2048),
         ("l4:4:512MiB", 512),
         ("l4:full", 23034),  # the real board
@@ -86,7 +86,7 @@ def test_cards_keep_their_own_sizes(monkeypatch):
     """Switching one card to full size must not resize the others."""
     monkeypatch.setenv("GPUEMU_FLEET", "l4,a100:full,h100:4GiB")
     sizes = {d.gres_name: d.mem_total_mib for d in spec.fleet()}
-    assert sizes == {"l4": 100, "a100": 81920, "h100": 4096}
+    assert sizes == {"l4": 200, "a100": 81920, "h100": 4096}
 
 
 def test_an_unknown_card_names_the_ones_that_exist(monkeypatch):
@@ -280,7 +280,8 @@ def test_seff_measures_against_the_card_the_job_ran_on(monkeypatch, tmp_path, ca
     [
         (40.0, "40 GB"),
         (1.0, "1 GB"),
-        (100 / 1024, "100 MB"),  # the default card
+        (200 / 1024, "200 MB"),  # the default card
+        (100 / 1024, "100 MB"),
         (0.5, "512 MB"),
     ],
 )

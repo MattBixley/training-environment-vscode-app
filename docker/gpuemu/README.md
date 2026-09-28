@@ -111,7 +111,7 @@ This is deliberate. Hitting OOM and learning to read it is a large part of what
 a GPU workshop is for, and an emulator with infinite memory would quietly teach
 the opposite of the thing that matters.
 
-Cards can be shrunk — `GPUEMU_FLEET=l4:100MiB` gives an L4 with 100 MB of VRAM,
+Cards can be shrunk — `GPUEMU_FLEET=l4:200MiB` gives an L4 with 200 MB of VRAM,
 which is the default.
 This is the practical way to run a memory-pressure exercise: the learner gets a
 real out-of-memory error from a tensor that costs the host almost nothing,
@@ -125,7 +125,7 @@ driver's reservation is scaled to the same proportion the real board has, so
 and they need not all be the same board:
 
 ```bash
-GPUEMU_FLEET=l4,a100_40,a100,h100,pro_6000   # one of each, 100 MB apiece
+GPUEMU_FLEET=l4,a100_40,a100,h100,pro_6000   # one of each, 200 MB apiece
 GPUEMU_FLEET=l4:4:2GiB,h100:2                # four L4s at 2 GiB, two H100s
 GPUEMU_FLEET=a100:full                       # one A100 at its real 80 GB
 ```

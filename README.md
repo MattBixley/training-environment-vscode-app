@@ -86,7 +86,7 @@ fails with a genuine out-of-memory error. Hitting OOM and learning to read it
 is a large part of what a GPU workshop is for, and an emulator with infinite
 memory would quietly teach the opposite.
 
-That capacity defaults to **100 MB per card**, not the board's real size — see
+That capacity defaults to **200 MB per card**, not the board's real size — see
 [Session options](#session-options). A small card is what makes the exercise
 affordable: filling a real 24 GB card would cost 24 GB of host RAM per session,
 and the node holds five cards.
@@ -153,7 +153,7 @@ Job Wall-time:          2%  00:00:02 of 00:02:00 time limit
 Avg CPU Utilisation:   42%  00:00:01 of 00:00:04 core-walltime
 Peak Mem Utilisation:   3%  13.41 MB of 512.00 MB
 Peak GPU Utilisation:   0%
-Peak GPU Memory Util:   0%  0.00 MB of 100 MB
+Peak GPU Memory Util:   0%  0.00 MB of 200 MB
 ```
 
 The numbers are measured, not invented. CPU time and peak resident memory come
@@ -204,7 +204,7 @@ a learner comparing what they see here against the hardware documentation
 finds the same VRAM figures and the same Slurm names.
 
 The form has one **GPU memory** control per card. It sets how much device
-memory that card reports, and **defaults to 100 MB** rather than the board's real
+memory that card reports, and **defaults to 200 MB** rather than the board's real
 size. That is deliberate: a small card is what makes memory pressure teachable,
 since a learner hits a genuine out-of-memory error with a tensor that costs the
 session almost nothing. Filling a real 24 GB card would need 24 GB of host RAM
@@ -303,7 +303,7 @@ Read by the emulator at startup; set in `submit.yml.erb` or the Dockerfile.
 |---|---|---|
 | `GPUEMU_FLEET` | the whole fleet | The node's GPUs; see below |
 | `GPUEMU_DEVICE` | `l4` | One card, when `GPUEMU_FLEET` is unset |
-| `GPUEMU_MEM_TOTAL` | `100MiB` | Its memory; empty means the real board's size |
+| `GPUEMU_MEM_TOTAL` | `200MiB` | Its memory; empty means the real board's size |
 | `GPUEMU_GPUS` | `1` | How many of it to present (max 8) |
 | `GPUEMU_UTIL_GAIN` | `1.0` | Scales derived utilisation; raise if jobs look idle |
 | `GPUEMU_AUTOCLAIM` | `1` | Claim the device when a process imports torch or numba.cuda |
@@ -318,7 +318,7 @@ field is a count, so `l4:2` is two cards and `l4:2GiB` is one card with 2 GiB.
 first entry is device 0.
 
 ```bash
-GPUEMU_FLEET=l4,a100_40,a100,h100,pro_6000   # the default: one of each, 100 MB
+GPUEMU_FLEET=l4,a100_40,a100,h100,pro_6000   # the default: one of each, 200 MB
 GPUEMU_FLEET=l4:4:2GiB,h100:2                # four L4s at 2 GiB, two H100s
 GPUEMU_FLEET=a100:full                       # one A100 at its real 80 GB
 ```

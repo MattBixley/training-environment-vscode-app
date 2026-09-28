@@ -165,15 +165,16 @@ ENV GPUEMU_SLURM_DIR=/run/gpuemu/slurm
 # between cards is something a learner can do here rather than only read about.
 # The app form overrides this; entries are name[:count][:vram].
 #
-# Each is deliberately shrunk to 100 MB of VRAM. A small card is what makes
+# Each is deliberately shrunk to 200 MB of VRAM. A small card is what makes
 # memory pressure teachable: a learner hits a real out-of-memory error with a
 # tensor that costs the session almost nothing, rather than needing to allocate
 # tens of gigabytes of host RAM to reach the limit. Every exercise is sized to
-# fit. Say `l4:1GiB` for a roomier card, or `l4:full` for the real 24 GB.
+# fit, with room to spare. Say `l4:1GiB` for a roomier card, or `l4:full` for
+# the real 24 GB.
 ENV GPUEMU_FLEET=l4,a100_40,a100,h100,pro_6000
 
 # The older single-card spelling, still read when GPUEMU_FLEET is unset.
-ENV GPUEMU_MEM_TOTAL=100MiB
+ENV GPUEMU_MEM_TOTAL=200MiB
 
 # Install the autoclaim hook into every Python process.
 #
