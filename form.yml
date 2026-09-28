@@ -42,13 +42,18 @@ attributes:
   # until a tensor is actually made. A filled card does cost that much host
   # memory though, which is why the figure is small: the whole fleet held at
   # once is a gigabyte of the session's 8 GB rather than five.
+  # The options below are repeated for each card rather than shared through a
+  # YAML anchor. Do not "tidy" that up: Open OnDemand's dashboard parses this
+  # file with `YAML.safe_load(contents)` and no `aliases: true`, so an anchor
+  # raises Psych::AliasesNotEnabled and the app silently does not appear at all.
+  # tests/test_app_config.py fails if one is reintroduced.
   vram_l4:
     widget: select
     label: "NVIDIA L4 - GPU memory"
     help: |
       The 24&nbsp;GB L4, requested as `--gpus-per-node l4:1`. This is the card
       the workshop exercises use, so switching it off will break them.
-    options: &vram_options
+    options:
       - ["200 MiB (default)", "200MiB"]
       - ["100 MiB", "100MiB"]
       - ["512 MiB", "512MiB"]
@@ -65,7 +70,15 @@ attributes:
     help: |
       The 40&nbsp;GB A100, requested as `--gpus-per-node a100_40:1`. The Slurm
       name is provisional until these nodes are in service.
-    options: *vram_options
+    options:
+      - ["200 MiB (default)", "200MiB"]
+      - ["100 MiB", "100MiB"]
+      - ["512 MiB", "512MiB"]
+      - ["1 GiB", "1GiB"]
+      - ["2 GiB", "2GiB"]
+      - ["4 GiB", "4GiB"]
+      - ["Full size (the real board)", "full"]
+      - ["Not on this node", "off"]
     value: "200MiB"
 
   vram_a100:
@@ -74,7 +87,15 @@ attributes:
     help: |
       The 80&nbsp;GB A100, requested as `--gpus-per-node a100:1`. The only card
       in the fleet built for double precision.
-    options: *vram_options
+    options:
+      - ["200 MiB (default)", "200MiB"]
+      - ["100 MiB", "100MiB"]
+      - ["512 MiB", "512MiB"]
+      - ["1 GiB", "1GiB"]
+      - ["2 GiB", "2GiB"]
+      - ["4 GiB", "4GiB"]
+      - ["Full size (the real board)", "full"]
+      - ["Not on this node", "off"]
     value: "200MiB"
 
   vram_h100:
@@ -82,7 +103,15 @@ attributes:
     label: "NVIDIA H100 NVL - GPU memory"
     help: |
       The 94&nbsp;GB H100 NVL, requested as `--gpus-per-node h100:1`.
-    options: *vram_options
+    options:
+      - ["200 MiB (default)", "200MiB"]
+      - ["100 MiB", "100MiB"]
+      - ["512 MiB", "512MiB"]
+      - ["1 GiB", "1GiB"]
+      - ["2 GiB", "2GiB"]
+      - ["4 GiB", "4GiB"]
+      - ["Full size (the real board)", "full"]
+      - ["Not on this node", "off"]
     value: "200MiB"
 
   vram_pro_6000:
@@ -91,7 +120,15 @@ attributes:
     help: |
       The 96&nbsp;GB RTX PRO 6000 Blackwell, requested as
       `--gpus-per-node pro_6000:1`.
-    options: *vram_options
+    options:
+      - ["200 MiB (default)", "200MiB"]
+      - ["100 MiB", "100MiB"]
+      - ["512 MiB", "512MiB"]
+      - ["1 GiB", "1GiB"]
+      - ["2 GiB", "2GiB"]
+      - ["4 GiB", "4GiB"]
+      - ["Full size (the real board)", "full"]
+      - ["Not on this node", "off"]
     value: "200MiB"
 
   wall_time:

@@ -37,6 +37,34 @@ jobs:
           echo "ok: they match"
 
 
+  # Open OnDemand's dashboard reads form.yml with `YAML.safe_load(contents)` and
+  # no `aliases: true`. Anything it cannot parse takes the app off the dashboard
+  # entirely - no error, no broken tile, the workshop is simply not there, and
+  # the next person to find out is whoever opens the training environment.
+  # v0.4.0 through v0.5.1 shipped a YAML anchor and were missing for that reason.
+  check-app-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: form.yml and manifest.yml must parse the way OnDemand parses them
+        run: |
+          ruby -ryaml -e '
+            fail = false
+            %w[form.yml manifest.yml].each do |f|
+              begin
+                YAML.safe_load(File.read(f))
+                puts "ok: #{f}"
+              rescue => e
+                puts "::error file=#{f}::#{e.class}: #{e.message}"
+                puts "  The dashboard uses safe_load, so the app would not appear at all."
+                puts "  YAML anchors and aliases are the usual cause - write the value out in full."
+                fail = true
+              end
+            end
+            exit 1 if fail
+          '
+
   # The staged template scripts must keep their executable bit. Open OnDemand
   # renders script.sh.erb into the job directory preserving its mode and then
   # runs it, so a file committed as 644 fails at session launch with
