@@ -24,6 +24,15 @@ FORM = REPO / "form.yml"
 MANIFEST = REPO / "manifest.yml"
 CARDS = ["l4", "a100_40", "a100", "h100", "pro_6000"]
 
+# These files configure the app; they are not shipped inside the image, and the
+# Dockerfile runs this suite from a copy of the package alone. Skipping there is
+# correct - there is nothing to check - and the check-app-config CI job is what
+# actually gates a release, so nothing is lost by the skip.
+pytestmark = pytest.mark.skipif(
+    not FORM.is_file(),
+    reason=f"{FORM} not present: running from a copy of the package, not the repository",
+)
+
 
 class NoAliasLoader(yaml.SafeLoader):
     """Refuses aliases, the way Ruby's Psych does in safe_load."""
