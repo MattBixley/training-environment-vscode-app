@@ -99,13 +99,13 @@ RUN git config --system init.defaultBranch main \
 
 # GitHub SSH goes over port 443 (ssh.github.com), which works where outbound 22
 # is blocked, and GitHub's published host keys are pinned so learners are not
-# asked to trust an unverified fingerprint
+# asked to trust an unverified fingerprint. The keys are committed rather than
+# fetched from api.github.com at build time, which rate-limits CI runners (403);
+# check them against https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
 COPY ssh/github.conf /etc/ssh/ssh_config.d/github.conf
-RUN curl -fsSL https://api.github.com/meta \
-        | python3 -c 'import json,sys; [print("github.com", k) for k in json.load(sys.stdin)["ssh_keys"]]' \
-        > /etc/ssh/ssh_known_hosts \
-    && chmod 0644 /etc/ssh/ssh_config.d/github.conf /etc/ssh/ssh_known_hosts \
-    && test -s /etc/ssh/ssh_known_hosts
+COPY ssh/known_hosts /etc/ssh/ssh_known_hosts
+RUN chmod 0644 /etc/ssh/ssh_config.d/github.conf /etc/ssh/ssh_known_hosts \
+    && ssh-keygen -lf /etc/ssh/ssh_known_hosts | grep -q "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU"
 
 COPY code-server/settings.json /opt/code-server/settings.json
 
