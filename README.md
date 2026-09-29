@@ -42,7 +42,7 @@ emulators come from.
 - GitHub's published SSH host keys are pinned, so learners never have to trust an unverified fingerprint
 - GitHub CLI (`gh`) as an HTTPS fallback (`gh auth login --web`)
 
-**Optional GPU and Slurm emulators** (off by default; tick **Emulated GPUs and Slurm** on the launch form)
+**Optional GPU and Slurm emulators** (off by default; set **Emulated GPUs and Slurm** to **On** on the launch form)
 
 - Emulated NVIDIA L4, A100 40/80 GB, H100 NVL and RTX PRO 6000 cards, each with configurable memory
 - `nvidia-smi` and `nvtop` with live telemetry
@@ -55,7 +55,7 @@ emulators come from.
 **Operations**
 
 - One image, `ghcr.io/mattbixley/training-environment-vscode-app`, about 0.9 GB compressed
-- Launch form: CPUs (2 or 4), memory (4 or 8 GB), emulator toggle, per-card GPU memory, wall time
+- Launch form: CPUs (2 or 4), memory (4 or 8 GB), emulator Off/On, wall time; the per-card GPU memory options appear only when the emulators are On
 - Workshop material is copied into home directories without overwriting learner work, so a restarted session picks up where it left off
 - CI checks that `form.yml` parses the way OnDemand parses it, that the templates are executable, and that the release tag matches the pinned image, before any image is pushed
 
@@ -75,7 +75,7 @@ documented, citable software.
 
 Launch with the defaults: 2 CPUs, 4 GB, emulators off.
 
-**Intro to GPU computing.** Tick the emulator box and choose 4 CPUs / 8 GB.
+**Intro to GPU computing.** Set the emulators to On and choose 4 CPUs / 8 GB.
 Learners run `nvidia-smi`, write an `sbatch` script requesting
 `--gpus-per-node l4:1`, watch it in `nvtop`, hit and fix a CUDA out-of-memory
 error, and read job efficiency with `seff`. They do all of this in the same editor
@@ -117,7 +117,7 @@ docker/workshop/       the exercises, copied to ~/gpu-training/
 
 The launch form asks for CPUs (2 or 4), memory (4 or 8 GB), wall time, and
 whether to start the **Emulated GPUs and Slurm**. Everything below applies only
-when the emulators are ticked; unticked, the card controls are hidden.
+when the emulators are On; while Off, the card controls are hidden.
 
 With the emulators on, the session's node presents **every card on Mahuika at once**, one of each:
 
@@ -273,14 +273,14 @@ hardware; design the workshop around it.
 
 # GPU and Slurm emulator reference
 
-Tick **Emulated GPUs and Slurm** on the launch form. The session then presents
+Set **Emulated GPUs and Slurm** to **On** on the launch form. The session then presents
 emulated NVIDIA GPUs: `nvidia-smi` and `nvtop` show devices with live
 telemetry, `sbatch`/`squeue`/`scancel` queue and run jobs that request GPUs,
 PyTorch's CUDA API works, and device memory is genuinely limited so
 oversubscribing it raises a real out-of-memory error.
 
-All computation runs on the CPU. There is no GPU anywhere. When the box is
-unticked, no emulator daemons run and the card controls are hidden.
+All computation runs on the CPU. There is no GPU anywhere. While it is Off, no
+emulator daemons run and the card controls are hidden.
 
 ## What this can and cannot teach
 

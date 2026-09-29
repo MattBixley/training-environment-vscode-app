@@ -85,3 +85,22 @@ def test_the_form_default_matches_the_emulator_default():
     from gpuemu.spec import DEFAULT_VRAM
 
     assert _form()["attributes"]["vram_l4"]["value"] == DEFAULT_VRAM
+
+
+def test_the_emulator_switch_hides_every_card_while_off():
+    """The card controls only appear once the emulators are switched On.
+
+    Each Off-option key must be data-hide-<field with - for _>. A check box's
+    data-hide-*-when-un-checked form cannot express vram_a100_40 or
+    vram_pro_6000 (OnDemand's parser throws on the "-40"), so this must stay a
+    select.
+    """
+    attr = _form()["attributes"]["gpu_emulator"]
+    assert attr["widget"] == "select"
+    options = {opt[1]: opt[2:] for opt in attr["options"]}
+    assert set(options) == {"0", "1"} and attr["value"] == "0"
+    off = {k: v for d in options["0"] for k, v in d.items()}
+    expected = {f"data-hide-vram-{c.replace('_', '-')}": True for c in CARDS}
+    assert off == expected
+    assert options["1"] == [], "On must not hide anything"
+

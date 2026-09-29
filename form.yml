@@ -35,20 +35,24 @@ attributes:
       - ["8", "8"]
     value: "4"
 
-  # Off by default: most workshops using this app do not need them. Unticked,
+  # Off by default: most workshops using this app do not need them. While Off,
   # the card controls below are hidden and no emulator daemons run.
+  #
+  # This is a select rather than a check box on purpose. OnDemand's check-box
+  # hide rules (data-hide-<field>-when-un-checked) are parsed with
+  # /^hide(\w+)When(\w+)$/ after jQuery camelCases the key, which leaves the
+  # hyphen in "-40" and "-6000"; the parse returns null, throws, and the A100,
+  # H100 and PRO 6000 controls never get hidden. Option-level data-hide-<field>
+  # has no such regex and resolves every card. tests/test_app_config.py checks
+  # the Off option hides every vram_ control.
   gpu_emulator:
-    widget: check_box
+    widget: select
     label: "Emulated GPUs and Slurm"
-    help: "Start the GPU emulator (nvidia-smi, torch.cuda) and the Slurm scheduler (sbatch, squeue)."
+    help: "Start the GPU emulator (nvidia-smi, torch.cuda) and the Slurm scheduler (sbatch, squeue). The GPU memory options appear when this is On."
     value: "0"
-    html_options:
-      data:
-        hide-vram-l4-when-un-checked: true
-        hide-vram-a100-40-when-un-checked: true
-        hide-vram-a100-when-un-checked: true
-        hide-vram-h100-when-un-checked: true
-        hide-vram-pro-6000-when-un-checked: true
+    options:
+      - ["Off", "0", data-hide-vram-l4: true, data-hide-vram-a100-40: true, data-hide-vram-a100: true, data-hide-vram-h100: true, data-hide-vram-pro-6000: true]
+      - ["On", "1"]
 
   # One control per card in Mahuika's fleet. The session's node presents every
   # card you leave switched on, so `--gpus-per-node a100:1` and
