@@ -5,62 +5,72 @@ exec &> >(tee -a "${LOG_DIR}/pod.log")
 
 echo "TIMING - Starting main script at: $(date)"
 
-# copying config file for debugging - updated path
-cp "${HOME}/ondemand_config.py" ./
-
 # Set working directory to home directory
 cd "${HOME}"
 
-set -x
-
 # ---------------------------------------------------------------------------
-# Start the GPU emulator.
+# GPU and Slurm emulators, switched on from the launch form (GPUEMU_ENABLE).
 #
-# Two background processes: gpuemud maintains the device state that nvidia-smi
-# and nvtop read, and gpuemu-slurmd runs submitted batch jobs. Both have to be
-# up before JupyterLab starts, otherwise the first thing a learner does -
-# running nvidia-smi - fails and the session looks broken.
-#
-# GPUEMU_DEVICE and GPUEMU_GPUS come from the form, through submit.yml.erb.
+# gpuemud maintains the device state that nvidia-smi and nvtop read, and
+# gpuemu-slurmd runs submitted batch jobs. Both have to be up before VS Code
+# starts, otherwise the first nvidia-smi a learner runs fails.
 # ---------------------------------------------------------------------------
-mkdir -p /run/gpuemu/claims /run/gpuemu/slurm/jobs
-chmod 1777 /run/gpuemu /run/gpuemu/claims /run/gpuemu/slurm /run/gpuemu/slurm/jobs || true
+if [[ "${GPUEMU_ENABLE:-0}" == "1" ]]; then
+    mkdir -p /run/gpuemu/claims /run/gpuemu/slurm/jobs
+    chmod 1777 /run/gpuemu /run/gpuemu/claims /run/gpuemu/slurm /run/gpuemu/slurm/jobs || true
 
-gpuemu-ctl start
+    gpuemu-ctl start
 
-# Fail loudly here rather than leaving a session where the GPU silently is not
-# there. Everything the workshop does depends on this working.
-if ! nvidia-smi -L; then
-    echo "ERROR: the GPU emulator did not start. Session will be unusable." >&2
-    gpuemu-ctl status >&2 || true
-    cat /run/gpuemu/gpuemud.log >&2 || true
+    # Fail loudly here rather than leaving a session where the GPU silently is
+    # not there.
+    if ! nvidia-smi -L; then
+        echo "ERROR: the GPU emulator did not start. GPU exercises will not work." >&2
+        gpuemu-ctl status >&2 || true
+        cat /run/gpuemu/gpuemud.log >&2 || true
+    fi
+
+    # GPU workshop material and the pre-recorded jobs its final chapter compares.
+    # --ignore-existing so a learner's edits survive a session restart.
+    mkdir -p "${HOME}/gpu-training"
+    rsync --ignore-existing -a /opt/gpu-training/workshop/ "${HOME}/gpu-training/"
+    gpuemu-seed-workshop --quiet || echo "WARNING: could not seed the recorded jobs"
+
+    echo "TIMING - GPU emulator started at: $(date)"
+else
+    # no daemons are running, so stop torch/numba imports claiming a device
+    export GPUEMU_AUTOCLAIM=0
+    echo "GPU and Slurm emulators are off for this session"
 fi
 
-echo "TIMING - GPU emulator started at: $(date)"
+# ---------------------------------------------------------------------------
+# Better Research Software: episode 1 has learners unzip this themselves, so it
+# is staged zipped and only if they have not already got it.
+# ---------------------------------------------------------------------------
+if [[ ! -e "${HOME}/spacewalks.zip" && ! -d "${HOME}/spacewalks" ]]; then
+    cp /opt/workshops/better-research-software/spacewalks.zip "${HOME}/"
+fi
 
 # ---------------------------------------------------------------------------
-# Copy workshop material into the user's home directory.
+# VS Code
 #
-# --ignore-existing so a learner's edits survive a session restart, which is
-# the same choice the other training apps make.
+# Extensions baked into the image are copied into the user's own extensions
+# directory, never overwriting what is there, so learners can add and update
+# their own. Default settings are only written when the user has none.
 # ---------------------------------------------------------------------------
-mkdir -p "${HOME}/gpu-training"
-rsync --ignore-existing -avz /opt/gpu-training/workshop/ "${HOME}/gpu-training/"
+CODE_SERVER_DATAROOT="${HOME}/.local/share/code-server"
+mkdir -p "${CODE_SERVER_DATAROOT}/extensions" "${CODE_SERVER_DATAROOT}/User"
+rsync --ignore-existing -a /opt/code-server/extensions/ "${CODE_SERVER_DATAROOT}/extensions/"
+if [[ ! -f "${CODE_SERVER_DATAROOT}/User/settings.json" ]]; then
+    cp /opt/code-server/settings.json "${CODE_SERVER_DATAROOT}/User/settings.json"
+fi
 
-# ---------------------------------------------------------------------------
-# Write the pre-recorded jobs the final chapter compares.
-#
-# Those exercises ask a learner to read ten finished jobs - the same work on
-# five cards, then on five core counts. Running them live would take most of
-# the session, and would be measured against the emulated card, which reports
-# the same memory whatever you ask for. So they are recorded instead: real job
-# records that seff and profile_plot read exactly as they read a job you ran.
-#
-# Existing jobs are left alone, so a restart does not undo anybody's work.
-# ---------------------------------------------------------------------------
-gpuemu-seed-workshop --quiet || echo "WARNING: could not seed the recorded jobs"
+echo "TIMING - Starting code-server at: $(date)"
 
-echo "TIMING - Starting jupyter at: $(date)"
-
-# launch JupyterLab
-jupyter lab --config="${CONFIG_FILE}"
+exec code-server \
+    --auth="password" \
+    --bind-addr="0.0.0.0:8443" \
+    --disable-telemetry \
+    --disable-update-check \
+    --user-data-dir="${CODE_SERVER_DATAROOT}" \
+    --extensions-dir="${CODE_SERVER_DATAROOT}/extensions" \
+    "${HOME}"

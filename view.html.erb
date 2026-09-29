@@ -1,12 +1,13 @@
-<form action="/node/<%= host %>/<%= port %>/login" method="post" target="_blank">
+<form id="<%= form_id %>" action="/rnode/<%= host %>/<%= port %>/login?to=" method="post" target="_blank">
   <input type="hidden" name="password" value="<%= password %>">
   <button class="btn btn-primary" type="submit">
-    <i class="fa fa-eye"></i> Connect to GPU JupyterLab
+    <i class="fa fa-code"></i> Connect to VS Code
   </button>
 </form>
 <p class="help-block" style="margin-top: 0.75em">
   <i class="fa fa-info-circle"></i>
-  This session uses an <strong>emulated GPU</strong>. <code>nvidia-smi</code>,
-  <code>nvtop</code>, <code>sbatch</code> and <code>torch.cuda</code> all work,
-  but all computation runs on the CPU &mdash; timings are not GPU timings.
+  If you switched on the GPU and Slurm emulators, the GPUs are
+  <strong>emulated</strong>. <code>nvidia-smi</code>, <code>sbatch</code> and
+  <code>torch.cuda</code> all work, but everything runs on the CPU, so timings
+  are not GPU timings.
 </p>

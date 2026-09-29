@@ -1,9 +1,9 @@
 ---
-name: GPU (JupyterLab)
+name: VS Code
 category: Interactive Apps
 subcategory: Servers
 role: batch_connect
 description: |
-  JupyterLab with an emulated NVIDIA GPU, for teaching GPU workflows on
-  hardware that has none. nvidia-smi, nvtop, sbatch and torch.cuda all work
-  against a simulated device; all computation runs on the CPU.
+  VS Code in the browser with Python, git, SSH and the GitHub CLI, for
+  research software workshops. Emulated NVIDIA GPUs and a Slurm scheduler can
+  be switched on at launch; all computation runs on the CPU.

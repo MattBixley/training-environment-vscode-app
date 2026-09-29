@@ -2,14 +2,14 @@
 #
 # Run the training session on your own machine, without deploying anything.
 #
-# This starts the same container image the cluster runs, with the GPU emulator
-# and JupyterLab, and prints a URL to open. What it does not reproduce is the
-# Open OnDemand wrapper around it: no login page, no k8s, no NFS home
+# This starts the same container image the cluster runs, with VS Code and the
+# GPU and Slurm emulators, and prints a URL to open. What it does not reproduce
+# is the Open OnDemand wrapper around it: no password, no k8s, no NFS home
 # directories, no LDAP. Everything a learner actually does inside the session -
-# nvidia-smi, nvtop, sbatch, seff, the exercises, PyTorch - behave identically.
+# git, venv, pytest, nvidia-smi, sbatch, seff, PyTorch - behaves identically.
 #
 # Usage:
-#   ./run-local.sh                          # the whole fleet, 1 GiB per card
+#   ./run-local.sh                          # the whole fleet, 200 MiB per card
 #   ./run-local.sh --fleet l4:4:2GiB        # four L4s with 2 GiB each
 #   ./run-local.sh --fleet 'l4,a100:full'   # an L4 and a full-size A100
 #   ./run-local.sh --build                  # build from this checkout first
@@ -21,7 +21,7 @@
 #
 set -euo pipefail
 
-REGISTRY_IMAGE="ghcr.io/nesi/training-environment-jupyter-gpu-app"
+REGISTRY_IMAGE="ghcr.io/mattbixley/training-environment-vscode-app"
 
 # Derive the tag from this checkout rather than hardcoding one. A pinned
 # default goes stale the moment a release is cut, and then this script quietly
@@ -34,8 +34,8 @@ default_image() {
 }
 
 IMAGE="$(default_image)"
-PORT=8888
-# Every card Mahuika has, one of each, deliberately shrunk to 1 GiB so that
+PORT=8443
+# Every card Mahuika has, one of each, at the image default of 200 MiB so that
 # running out of GPU memory is cheap to demonstrate.
 FLEET="l4,a100_40,a100,h100,pro_6000"
 CPUS="4"
@@ -78,7 +78,7 @@ fi
 
 if [[ "$BUILD" == "1" ]]; then
     echo "Building from this checkout..."
-    IMAGE="gpu-app:local"
+    IMAGE="vscode-app:local"
     docker build -t "$IMAGE" "$(dirname "$0")/docker"
 fi
 
@@ -110,6 +110,7 @@ COMMON=(
     --cpus "$CPUS"
     --memory "$MEMORY"
     -e GPUEMU_FLEET="$FLEET"
+    -e GPUEMU_ENABLE=1
     -e TERM=xterm-256color
 )
 
@@ -120,19 +121,19 @@ fi
 
 cat <<BANNER
 
-  Starting the GPU training session locally.
+  Starting the VS Code training session locally.
 
     Emulated GPUs: $FLEET
     Resources    : $CPUS CPUs, $MEMORY RAM
     Image        : $IMAGE
 
-  JupyterLab will be at:  http://localhost:${PORT}/lab
-  Exercises are under     /root/gpu-training/
+  VS Code will be at:     http://localhost:${PORT}/
+  GPU exercises are under /root/gpu-training/
   Press Ctrl-C to stop.
 
 BANNER
 
-exec docker run "${COMMON[@]}" -p "${PORT}:8888" "$IMAGE" bash -lc '
+exec docker run "${COMMON[@]}" -p "${PORT}:8443" "$IMAGE" bash -lc '
     set -e
     gpuemu-ctl start >/dev/null
 
@@ -141,13 +142,15 @@ exec docker run "${COMMON[@]}" -p "${PORT}:8888" "$IMAGE" bash -lc '
     mkdir -p "${HOME}/gpu-training"
     rsync --ignore-existing -a /opt/gpu-training/workshop/ "${HOME}/gpu-training/"
     gpuemu-seed-workshop --quiet || true
+    cp -n /opt/workshops/better-research-software/spacewalks.zip "${HOME}/" || true
+    mkdir -p "${HOME}/.local/share/code-server/User"
+    rsync --ignore-existing -a /opt/code-server/extensions/ "${HOME}/.local/share/code-server/extensions/"
+    cp -n /opt/code-server/settings.json "${HOME}/.local/share/code-server/User/settings.json" || true
 
     nvidia-smi -L
     echo
 
     cd "${HOME}"
-    exec jupyter lab \
-        --ip 0.0.0.0 --port 8888 --no-browser --allow-root \
-        --ServerApp.token="" --ServerApp.password="" \
-        --ServerApp.root_dir="${HOME}"
+    exec code-server --auth none --bind-addr 0.0.0.0:8443 --disable-telemetry \
+        --extensions-dir "${HOME}/.local/share/code-server/extensions" "${HOME}"
 '

@@ -1,11 +1,4 @@
 <%
-   pwd_cfg = "c.ServerApp.password=u\'sha1:${SALT}:${PASSWORD_SHA1}\'"
-   host_port_cfg = "c.ServerApp.base_url=\'/node/${HOST_CFG}/${PORT_CFG}/\'"
-
-   configmap_filename = "ondemand_config.py"
-   configmap_data = "c.NotebookApp.port = 8080"
-   utility_img = "ghcr.io/nesi/training-environment-k8s-utils:v0.1.0"
-
    user = OodSupport::User.new
 
    services_node = Resolv.getaddress("servicesnode")
@@ -24,6 +17,9 @@
     .map { |card, vram| "#{card}:#{vram}" }
     .join(",")
    fleet = "l4:1GiB" if fleet.empty?
+
+   # the form's check box posts "1" when ticked
+   gpuemu_enable = gpu_emulator.to_s == "1" ? "1" : "0"
 %>
 ---
 script:
@@ -31,13 +27,13 @@ script:
   wall_time: "<%= wall_time.to_i * 3600 %>"
   native:
     container:
-      name: "gpu"
+      name: "vscode"
       # This tag is what the session actually runs, and it must match the git
       # tag this file is released under. The training-environment config's
       # `k8s_container` does NOT control it - that value only tells the pod
       # pre-puller which image to cache on the worker nodes. Bump both together
       # on every release; CI enforces it on tag builds.
-      image: "ghcr.io/nesi/training-environment-jupyter-gpu-app:v0.5.3"
+      image: "ghcr.io/mattbixley/training-environment-vscode-app:v0.1.0"
       command: ["/bin/bash","-l","<%= staged_root %>/job_script_content.sh"]
       working_dir: "<%= Etc.getpwnam(ENV['USER']).dir %>"
       restart_policy: 'OnFailure'
@@ -53,7 +49,9 @@ script:
         # sbatch to decide whether a requested card exists. See gpuemu/spec.py
         # for the device definitions.
         GPUEMU_FLEET: "<%= fleet %>"
-      port: "8080"
+        # "1" starts the GPU and Slurm emulators (template/script.sh.erb)
+        GPUEMU_ENABLE: "<%= gpuemu_enable %>"
+      port: "8443"
       cpu: "<%= cpu %>"
       memory: "<%= memory %>Gi"
     mounts:
@@ -77,8 +75,6 @@ script:
         - filename: 'k8_helper'
           data: |
             #!/usr/bin/env bash
-
-            set -x
 
             KEY=$1
             VALUE=$(echo -n $2 | base64)

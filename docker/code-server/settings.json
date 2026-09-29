@@ -1,0 +1,14 @@
+{
+    "workbench.startupEditor": "none",
+    "security.workspace.trust.enabled": false,
+    "telemetry.telemetryLevel": "off",
+    "update.mode": "none",
+    "extensions.autoCheckUpdates": false,
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "terminal.integrated.profiles.linux": {
+        "bash": { "path": "bash", "args": ["-l"] }
+    },
+    "python.languageServer": "None",
+    "basedpyright.analysis.typeCheckingMode": "off",
+    "python.terminal.activateEnvironment": true
+}

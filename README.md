@@ -1,16 +1,56 @@
-# REANNZ training environment GPU JupyterLab app
+# REANNZ training environment VS Code app
 
-JupyterLab app for running GPU workshops on the NeSI training environment,
-**on infrastructure that has no GPUs**.
+Browser-based VS Code ([code-server](https://github.com/coder/code-server)) for
+research software workshops on the NeSI training environment. The first
+workshop to use it is [Better Research Software][brs].
 
-The session presents an emulated NVIDIA L4. `nvidia-smi` and `nvtop` show a
-device with live telemetry, `sbatch`/`squeue`/`scancel` queue and run jobs that
-request GPUs, PyTorch's CUDA API works, and device memory is genuinely limited
-so oversubscribing it raises a real out-of-memory error.
+Forked from [training-environment-jupyter-gpu-app][gpu-app], so the same
+**GPU and Slurm emulators** are available, switched on per session from the
+launch form.
 
-All computation runs on the CPU. There is no GPU anywhere.
+[brs]: https://carpentries-incubator.github.io/better-research-software/
+[gpu-app]: https://github.com/nesi/training-environment-jupyter-gpu-app
+
+## What is in the session
+
+| | |
+|---|---|
+| Editor | code-server 4.139.1, opened at `$HOME` |
+| Extensions | Python, Python Debugger, basedpyright (language server; Pylance is not on Open VSX), autoDocstring, Git Graph, Live Preview |
+| Python | 3.12 (Ubuntu 24.04) with `venv` and `pip`; the system Python is externally managed, so `pip install` belongs in a venv as the lesson teaches |
+| git | `init.defaultBranch main`, `core.editor "nano -w"` set system-wide; learners set their own name and email |
+| SSH | `ssh`/`ssh-keygen`; `github.com` is routed to `ssh.github.com:443` and GitHub's host keys are pinned, so `git@github.com:` remotes work where port 22 is blocked |
+| GitHub CLI | `gh`, as an HTTPS fallback (`gh auth login --web`) |
+| Workshop material | `~/spacewalks.zip` for Better Research Software, left zipped because episode 1 unzips it |
+| Emulators (optional) | emulated NVIDIA GPUs (`nvidia-smi`, `nvtop`, `torch.cuda`) and Slurm (`sbatch`, `squeue`, `sacct`, `seff`), material in `~/gpu-training/` |
+
+Extensions are baked into the image and copied into each user's own
+extensions directory on first start, so learners can still install and update
+their own from Open VSX. Default settings are written only when the user has
+none.
+
+### Using it for Better Research Software
+
+- Episode 2 (SSH keys): `ssh-keygen -t ed25519`, then paste `~/.ssh/id_ed25519.pub`
+  into GitHub. Keys live in the learner's NFS home, so they survive session
+  restarts; remind learners to delete the key from GitHub after the workshop.
+- Episodes 6 and 7 open `htmlcov/index.html` and `site/index.html`: right-click
+  the file and choose **Show Preview** (Live Preview).
+- The lesson's setup check runs `code --list-extensions`; in a code-server
+  terminal `code` is the remote CLI and may behave differently, so skip that step.
 
 ---
+
+# GPU and Slurm emulators
+
+Tick **Emulated GPUs and Slurm** on the launch form. The session then presents
+emulated NVIDIA GPUs: `nvidia-smi` and `nvtop` show devices with live
+telemetry, `sbatch`/`squeue`/`scancel` queue and run jobs that request GPUs,
+PyTorch's CUDA API works, and device memory is genuinely limited so
+oversubscribing it raises a real out-of-memory error.
+
+All computation runs on the CPU. There is no GPU anywhere. Unticked, no
+emulator daemons run and the card controls are hidden.
 
 ## What this can and cannot teach
 
@@ -172,9 +212,11 @@ that absence is the diagnosis for "why was my GPU job so slow?".
 ## Repository layout
 
 ```
-form.yml               session options: CPUs, memory, per-card GPU memory, wall time
-submit.yml.erb         k8s pod spec; composes GPUEMU_FLEET from the form
-template/script.sh.erb starts the emulator, copies the material, launches JupyterLab
+form.yml               session options: CPUs, memory, emulator toggle, per-card GPU memory, wall time
+submit.yml.erb         k8s pod spec; composes GPUEMU_FLEET and GPUEMU_ENABLE from the form
+template/script.sh.erb starts the emulators if enabled, copies the material, launches code-server
+docker/code-server/    default VS Code settings
+docker/ssh/            GitHub SSH-over-443 config
 docker/Dockerfile      the session image
 docker/gpuemu/         the emulator (see docker/gpuemu/README.md)
 docker/workshop/       the exercises, copied to ~/gpu-training/
@@ -223,10 +265,10 @@ For more than one of a card — which is how to teach device selection and
 [configuration reference](#configuration-reference). The scheduler allocates
 devices to jobs independently.
 
-CPU and memory default to 4 cores and 8 GB. Do not reduce the CPU allocation
-much below that: emulated GPU utilisation is derived from real CPU use, so on
-one or two cores every trivial job pins the meter at 100% and the reading stops
-teaching anything.
+CPU and memory default to 2 cores and 4 GB, which is plenty for Better
+Research Software. Choose 4 cores and 8 GB for GPU workshops: emulated GPU
+utilisation is derived from real CPU use, so on one or two cores every trivial
+job pins the meter at 100% and the reading stops teaching anything.
 
 ## Trying it on your own machine
 
@@ -234,13 +276,13 @@ teaching anything.
 ./run-local.sh
 ```
 
-This starts the same image the cluster runs and prints a JupyterLab URL. Docker
-is the only requirement.
+This starts the same image the cluster runs, with the emulators on and no
+password, and prints a VS Code URL. Docker is the only requirement.
 
 ```bash
 ./run-local.sh --fleet 'l4,a100:full'          # an L4 and a full-size A100
 ./run-local.sh --fleet l4:4:2GiB               # four L4s with 2 GiB each
-./run-local.sh --shell                         # a terminal instead of JupyterLab
+./run-local.sh --shell                         # a terminal instead of VS Code
 ./run-local.sh --build                         # build from this checkout first
 ```
 
@@ -279,8 +321,8 @@ honest.
 Full image:
 
 ```bash
-docker build -t gpu-app docker/
-docker run --rm -it gpu-app bash -lc 'gpuemu-ctl start && nvidia-smi && nvtop'
+docker build -t vscode-app docker/
+docker run --rm -it vscode-app bash -lc 'gpuemu-ctl start && nvidia-smi && nvtop'
 ```
 
 Pushing to this repo triggers the container build in
@@ -288,9 +330,11 @@ Pushing to this repo triggers the container build in
 
 ## Deploying it
 
-The app is deployed through the [training-environment][te] repo. The `gpu`
-branch there is configured for this app with one trainer and one training user;
-see [the deployment tutorial][deploy].
+The app is deployed through the [training-environment][te] repo, as the
+`vscode` entry in `vars/ondemand-config.yml.example`; see
+[the deployment tutorial][deploy]. The image is published to
+`ghcr.io/mattbixley/training-environment-vscode-app`, which must be set to
+**public** in the package settings before the cluster can pull it.
 
 [te]: https://github.com/nesi/training-environment
 [deploy]: https://nesi.github.io/training-environment/tutorials/deployment-on-nesi/

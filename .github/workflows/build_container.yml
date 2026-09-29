@@ -26,7 +26,7 @@ jobs:
       - name: submit.yml.erb must pin this release's tag
         run: |
           tag="${GITHUB_REF_NAME}"
-          pinned=$(grep -oE 'training-environment-jupyter-gpu-app:[^"]+' submit.yml.erb | cut -d: -f2)
+          pinned=$(grep -oE 'training-environment-vscode-app:[^"]+' submit.yml.erb | cut -d: -f2)
           echo "git tag            : $tag"
           echo "submit.yml.erb pins: $pinned"
           if [ "$pinned" != "$tag" ]; then
@@ -89,7 +89,11 @@ jobs:
           done
           exit $fail
 
+  # The image is only pushed once every check has passed. check-submit-image-tag
+  # is skipped on branch pushes, so a skipped check still lets the build run.
   build-and-push-image:
+    needs: [check-submit-image-tag, check-app-config, check-template-permissions]
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:

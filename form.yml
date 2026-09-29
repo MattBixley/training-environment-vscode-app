@@ -4,6 +4,7 @@ cluster: "my-k8s-cluster"
 form:
   - cpu
   - memory
+  - gpu_emulator
   - vram_l4
   - vram_a100_40
   - vram_a100
@@ -16,8 +17,38 @@ attributes:
   # from how much of the CPU allocation a job actually uses. Too few cores and
   # every job looks busy at trivial load; these defaults give PyTorch enough to
   # work with and make the utilisation reading mean something.
-  cpu: 4
-  memory: 8
+  #
+  # The Better Research Software lesson needs very little, so the default is
+  # small; pick 4 CPUs / 8 GB when the GPU emulator is on.
+  cpu:
+    widget: select
+    label: "CPUs"
+    options:
+      - ["2", "2"]
+      - ["4", "4"]
+    value: "2"
+  memory:
+    widget: select
+    label: "Memory (GB)"
+    options:
+      - ["4", "4"]
+      - ["8", "8"]
+    value: "4"
+
+  # Off by default: most workshops using this app do not need them. Unticked,
+  # the card controls below are hidden and no emulator daemons run.
+  gpu_emulator:
+    widget: check_box
+    label: "Emulated GPUs and Slurm"
+    help: "Start the GPU emulator (nvidia-smi, torch.cuda) and the Slurm scheduler (sbatch, squeue)."
+    value: "0"
+    html_options:
+      data:
+        hide-vram-l4-when-un-checked: true
+        hide-vram-a100-40-when-un-checked: true
+        hide-vram-a100-when-un-checked: true
+        hide-vram-h100-when-un-checked: true
+        hide-vram-pro-6000-when-un-checked: true
 
   # One control per card in Mahuika's fleet. The session's node presents every
   # card you leave switched on, so `--gpus-per-node a100:1` and

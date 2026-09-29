@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # install system dependencies
 # (ldap-utils, libnss-ldapd, libpam-ldapd, nscd, nslcd are needed to resolve
@@ -8,6 +8,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
         curl \
         git \
         dnsutils \
+        gnupg \
         htop \
         locales \
         ldap-utils \
@@ -15,14 +16,15 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
         libpam-ldapd \
         less \
         nano \
-        nodejs \
         nscd \
         nslcd \
+        openssh-client \
         pciutils \
         python-is-python3 \
         python3 \
         python3-dev \
         python3-pip \
+        python3-venv \
         rsync \
         time \
         unzip \
@@ -30,12 +32,15 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
         wget \
         zip \
     && rm -rf /var/lib/apt/lists/* \
-    && localedef -i en_NZ -c -f UTF-8 -A /usr/share/locale/locale.alias en_NZ.UTF-8
+    && localedef -i en_NZ -c -f UTF-8 -A /usr/share/locale/locale.alias en_NZ.UTF-8 \
+    # 24.04 ships an "ubuntu" user at uid 1000; drop it so the uid can only
+    # resolve to a training user through LDAP
+    && userdel -r ubuntu
 
-ENV LANG en_NZ.utf8
+ENV LANG=en_NZ.utf8
 
 # install kubectl, required for running on the k8s cluster
-ARG KUBECTL_VERSION=v1.28.5
+ARG KUBECTL_VERSION=v1.31.8
 RUN curl -LO https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl \
     && mv kubectl /usr/local/bin/kubectl \
     && chmod +x /usr/local/bin/kubectl
@@ -49,6 +54,61 @@ RUN git clone https://github.com/nesi/training-environment-k8s-utils.git /opt/oo
     && mv /opt/ood-k8s-utils/files/* /bin/ \
     && rm -rf /opt/ood-k8s-utils
 
+# make a dummy module command to avoid warnings from ondemand job_script_content.sh
+RUN echo "#!/bin/bash" > /bin/module \
+    && chmod +x /bin/module
+
+# ---------------------------------------------------------------------------
+# VS Code (code-server) and the tools the Better Research Software lesson uses
+# ---------------------------------------------------------------------------
+ARG CODE_RELEASE=4.139.1
+RUN mkdir -p /app/code-server \
+    && curl -fsSL -o /tmp/code-server.tar.gz \
+        "https://github.com/coder/code-server/releases/download/v${CODE_RELEASE}/code-server-${CODE_RELEASE}-linux-amd64.tar.gz" \
+    && tar xf /tmp/code-server.tar.gz -C /app/code-server --strip-components=1 \
+    && rm -f /tmp/code-server.tar.gz \
+    && ln -s /app/code-server/bin/code-server /usr/local/bin/code-server \
+    && code-server --version
+
+# Extensions are installed once here and copied into each user's extensions
+# directory on first start, so learners can still add their own. Pylance is
+# Microsoft-only and not on Open VSX; basedpyright stands in as the language server.
+RUN for ext in \
+        ms-python.python@2026.4.0 \
+        ms-python.debugpy@2026.6.0 \
+        detachhead.basedpyright@1.40.1 \
+        njpwerner.autodocstring@0.6.1 \
+        mhutchie.git-graph@1.30.0 \
+        ms-vscode.live-server@0.4.20 \
+    ; do code-server --extensions-dir /opt/code-server/extensions --install-extension "$ext" || exit 1; done \
+    && chmod -R a+rX /opt/code-server \
+    && code-server --extensions-dir /opt/code-server/extensions --list-extensions --show-versions
+
+# GitHub CLI, for learners whose network blocks GitHub SSH entirely
+RUN curl -fsSL -o /usr/share/keyrings/githubcli-archive-keyring.gpg https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/* \
+    && gh --version
+
+# Git defaults the lesson's setup check expects; learners still set their own
+# user.name and user.email
+RUN git config --system init.defaultBranch main \
+    && git config --system core.editor "nano -w"
+
+# GitHub SSH goes over port 443 (ssh.github.com), which works where outbound 22
+# is blocked, and GitHub's published host keys are pinned so learners are not
+# asked to trust an unverified fingerprint
+COPY ssh/github.conf /etc/ssh/ssh_config.d/github.conf
+RUN curl -fsSL https://api.github.com/meta \
+        | python3 -c 'import json,sys; [print("github.com", k) for k in json.load(sys.stdin)["ssh_keys"]]' \
+        > /etc/ssh/ssh_known_hosts \
+    && chmod 0644 /etc/ssh/ssh_config.d/github.conf /etc/ssh/ssh_known_hosts \
+    && test -s /etc/ssh/ssh_known_hosts
+
+COPY code-server/settings.json /opt/code-server/settings.json
+
 # ---------------------------------------------------------------------------
 # nvtop
 #
@@ -60,7 +120,7 @@ RUN git clone https://github.com/nesi/training-environment-k8s-utils.git /opt/oo
 # ---------------------------------------------------------------------------
 ARG NVTOP_VERSION=3.1.0
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        cmake libncurses5-dev libncursesw5-dev libdrm-dev \
+        cmake libncurses-dev libdrm-dev \
     && git clone --depth 1 --branch $NVTOP_VERSION https://github.com/Syllo/nvtop.git /tmp/nvtop \
     && mkdir -p /tmp/nvtop/build \
     && cd /tmp/nvtop/build \
@@ -88,24 +148,19 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
 # gpuemu.torch_shim is what makes CUDA-flavoured code work on top of it.
 # ---------------------------------------------------------------------------
 
-# Ubuntu 22.04 ships setuptools 59, which predates PEP 621 and would silently
-# install gpuemu as a package called "UNKNOWN" instead of reading [project]
-# from pyproject.toml. Upgrading first is what makes that install work.
-RUN pip3 --no-cache-dir install --upgrade pip 'setuptools>=64' wheel
-
-RUN pip3 --no-cache-dir install \
-        jupyterlab \
-        jupyterlab-nvdashboard \
-        notebook \
-        ipywidgets \
+# Ubuntu 24.04 marks the system Python as externally managed (PEP 668). The
+# emulator stack is installed into it deliberately, so these builds pass
+# --break-system-packages; learners are left with the default, which steers
+# `pip install` into the venv the lesson teaches.
+RUN pip3 --no-cache-dir install --break-system-packages \
         matplotlib \
         numpy \
         pandas \
         nvidia-ml-py \
-    && pip3 --no-cache-dir install \
+    && pip3 --no-cache-dir install --break-system-packages \
         --index-url https://download.pytorch.org/whl/cpu \
         torch torchvision \
-    && pip3 --no-cache-dir install numba pytest
+    && pip3 --no-cache-dir install --break-system-packages numba pytest pyyaml
 
 # Numba's CUDA simulator runs @cuda.jit kernels in the interpreter, so learners
 # can write and debug real CUDA kernel code - threads, blocks, shared memory,
@@ -126,7 +181,7 @@ RUN cd /opt/gpuemu/src/nvml \
     && echo "/opt/gpuemu/lib" > /etc/ld.so.conf.d/gpuemu.conf \
     && ldconfig \
     && cd /opt/gpuemu/src \
-    && pip3 --no-cache-dir install . \
+    && pip3 --no-cache-dir install --break-system-packages . \
     && install -m 0755 /opt/gpuemu/src/bin/nvidia-smi /usr/local/bin/nvidia-smi \
     && install -d /run/gpuemu /run/gpuemu/claims /run/gpuemu/slurm/jobs \
     && chmod 1777 /run/gpuemu /run/gpuemu/claims /run/gpuemu/slurm /run/gpuemu/slurm/jobs
@@ -150,7 +205,7 @@ a=np.arange(64,dtype=np.float32); b=a*2; o=np.zeros_like(a);\
 add[2,32](a,b,o);\
 assert np.allclose(o,a+b), o;\
 print('numba cudasim OK')" \
-    && pip3 uninstall -y pytest \
+    && pip3 uninstall -y --break-system-packages pytest \
     && rm -rf /run/gpuemu/state.bin /opt/gpuemu/src/.pytest_cache
 
 # Claim the device automatically when a process imports torch or numba.cuda, so
@@ -200,7 +255,7 @@ RUN SITEDIR="$(python3 -c 'import gpuemu, pathlib; print(pathlib.Path(gpuemu.__f
         > "${SITEDIR}/gpuemu_autostart.py" \
     && echo 'import gpuemu_autostart' > "${SITEDIR}/zz-gpuemu-autostart.pth" \
     && python3 -c "import sys; assert 'gpuemu_autostart' in sys.modules, 'the .pth did not run'" \
-    && rm -f /usr/local/lib/python3.10/dist-packages/sitecustomize.py
+    && rm -f /usr/local/lib/python3*/dist-packages/sitecustomize.py
 
 # ---------------------------------------------------------------------------
 # Workshop material
@@ -212,7 +267,18 @@ COPY workshop /opt/gpu-training/workshop
 RUN chmod -R o+rX /opt/gpu-training \
     && chmod 0755 /opt/gpu-training/workshop/*/*.sh
 
+# Better Research Software lesson material: the zip learners unzip in episode 1
+ARG BRS_COMMIT=4d31499b0c401ebd4fcbbad34a7e5bb588c4cf84
+ARG SPACEWALKS_SHA256=6af7156e033bd1900659bf042e4b7efe45b35de9a8fb212d224640003ec58297
+RUN mkdir -p /opt/workshops/better-research-software \
+    && curl -fsSL -o /opt/workshops/better-research-software/spacewalks.zip \
+        "https://github.com/carpentries-incubator/better-research-software/raw/${BRS_COMMIT}/learners/spacewalks.zip" \
+    && echo "${SPACEWALKS_SHA256}  /opt/workshops/better-research-software/spacewalks.zip" | sha256sum -c - \
+    && chmod -R a+rX /opt/workshops
+
 # A short banner so anyone opening a terminal knows the GPU is emulated. Being
 # quiet about that would be the one genuinely harmful thing this image could do.
 COPY profile.d/gpuemu.sh /etc/profile.d/gpuemu.sh
 RUN chmod 0644 /etc/profile.d/gpuemu.sh
+
+EXPOSE 8443
