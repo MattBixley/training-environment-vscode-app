@@ -29,25 +29,11 @@ if [[ "${GPUEMU_ENABLE:-0}" == "1" ]]; then
         cat /run/gpuemu/gpuemud.log >&2 || true
     fi
 
-    # GPU workshop material and the pre-recorded jobs its final chapter compares.
-    # --ignore-existing so a learner's edits survive a session restart.
-    mkdir -p "${HOME}/gpu-training"
-    rsync --ignore-existing -a /opt/gpu-training/workshop/ "${HOME}/gpu-training/"
-    gpuemu-seed-workshop --quiet || echo "WARNING: could not seed the recorded jobs"
-
     echo "TIMING - GPU emulator started at: $(date)"
 else
     # no daemons are running, so stop torch/numba imports claiming a device
     export GPUEMU_AUTOCLAIM=0
     echo "GPU and Slurm emulators are off for this session"
-fi
-
-# ---------------------------------------------------------------------------
-# Better Research Software: episode 1 has learners unzip this themselves, so it
-# is staged zipped and only if they have not already got it.
-# ---------------------------------------------------------------------------
-if [[ ! -e "${HOME}/spacewalks.zip" && ! -d "${HOME}/spacewalks" ]]; then
-    cp /opt/workshops/better-research-software/spacewalks.zip "${HOME}/"
 fi
 
 # ---------------------------------------------------------------------------

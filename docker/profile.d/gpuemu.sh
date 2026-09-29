@@ -20,8 +20,6 @@ if [ -n "${PS1:-}" ] && [ -z "${GPUEMU_BANNER_SHOWN:-}" ] && [ "${GPUEMU_ENABLE:
   │  nvtop               live view (q to quit)                         │
   │  sbatch job.sl       submit a job   ·   squeue    check the queue  │
   │  gpuemu-ctl status   check the emulator itself                     │
-  │                                                                    │
-  │  GPU exercises: ~/gpu-training/                                    │
   └────────────────────────────────────────────────────────────────────┘
 
 BANNER

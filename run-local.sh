@@ -128,7 +128,6 @@ cat <<BANNER
     Image        : $IMAGE
 
   VS Code will be at:     http://localhost:${PORT}/
-  GPU exercises are under /root/gpu-training/
   Press Ctrl-C to stop.
 
 BANNER
@@ -139,10 +138,6 @@ exec docker run "${COMMON[@]}" -p "${PORT}:8443" "$IMAGE" bash -lc '
 
     # Mirror what template/script.sh.erb does on the cluster, so the session
     # you see locally has the same contents as the deployed one.
-    mkdir -p "${HOME}/gpu-training"
-    rsync --ignore-existing -a /opt/gpu-training/workshop/ "${HOME}/gpu-training/"
-    gpuemu-seed-workshop --quiet || true
-    cp -n /opt/workshops/better-research-software/spacewalks.zip "${HOME}/" || true
     mkdir -p "${HOME}/.local/share/code-server/User"
     rsync --ignore-existing -a /opt/code-server/extensions/ "${HOME}/.local/share/code-server/extensions/"
     cp -n /opt/code-server/settings.json "${HOME}/.local/share/code-server/User/settings.json" || true

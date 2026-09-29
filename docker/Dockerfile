@@ -140,7 +140,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# Python stack for the workshop
+# Python stack for the emulators
 #
 # This comes before the emulator source is copied so that editing the emulator
 # does not invalidate a two-gigabyte download. torch is the CPU build: the CUDA
@@ -256,25 +256,6 @@ RUN SITEDIR="$(python3 -c 'import gpuemu, pathlib; print(pathlib.Path(gpuemu.__f
     && echo 'import gpuemu_autostart' > "${SITEDIR}/zz-gpuemu-autostart.pth" \
     && python3 -c "import sys; assert 'gpuemu_autostart' in sys.modules, 'the .pth did not run'" \
     && rm -f /usr/local/lib/python3*/dist-packages/sitecustomize.py
-
-# ---------------------------------------------------------------------------
-# Workshop material
-# ---------------------------------------------------------------------------
-# Scripts and job files, not notebooks: the workshop is taught in a terminal,
-# because a terminal is where a researcher will actually be when they run this
-# on the cluster.
-COPY workshop /opt/gpu-training/workshop
-RUN chmod -R o+rX /opt/gpu-training \
-    && chmod 0755 /opt/gpu-training/workshop/*/*.sh
-
-# Better Research Software lesson material: the zip learners unzip in episode 1
-ARG BRS_COMMIT=4d31499b0c401ebd4fcbbad34a7e5bb588c4cf84
-ARG SPACEWALKS_SHA256=6af7156e033bd1900659bf042e4b7efe45b35de9a8fb212d224640003ec58297
-RUN mkdir -p /opt/workshops/better-research-software \
-    && curl -fsSL -o /opt/workshops/better-research-software/spacewalks.zip \
-        "https://github.com/carpentries-incubator/better-research-software/raw/${BRS_COMMIT}/learners/spacewalks.zip" \
-    && echo "${SPACEWALKS_SHA256}  /opt/workshops/better-research-software/spacewalks.zip" | sha256sum -c - \
-    && chmod -R a+rX /opt/workshops
 
 # A short banner so anyone opening a terminal knows the GPU is emulated. Being
 # quiet about that would be the one genuinely harmful thing this image could do.

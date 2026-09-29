@@ -49,11 +49,11 @@ emulators come from.
 - PyTorch `torch.cuda` works and enforces device memory limits, so out-of-memory errors are real
 - Numba's CUDA simulator runs `@cuda.jit` kernels
 - A single-node Slurm stand-in: `sbatch`, `squeue`, `scancel`, `sinfo`, `sacct`, `scontrol`, `srun`, `seff`
-- GPU workshop exercises and pre-recorded jobs in `~/gpu-training/`
 - **All computation runs on the CPU.** Timings mean nothing about GPU performance, and the session says so.
 
 **Operations**
 
+- Sessions start in an empty home directory: the app stages no data or workshop directories, so each workshop brings its own material
 - One image, `ghcr.io/mattbixley/training-environment-vscode-app`, about 0.9 GB compressed
 - Launch form: CPUs (2 or 4), memory (4 or 8 GB), emulator Off/On, wall time; the per-card GPU memory options appear only when the emulators are On
 - Workshop material is copied into home directories without overwriting learner work, so a restarted session picks up where it left off
@@ -65,7 +65,7 @@ emulators come from.
 with a messy Python project and turn it into reproducible, tested,
 documented, citable software.
 
-- Unzip the lesson's `~/spacewalks.zip` (already staged) and open the folder in VS Code
+- Download the lesson's `spacewalks.zip` into the home directory (`wget` it from the lesson's setup page), `unzip` it, and open the folder in VS Code
 - `git init`, commit, then create a GitHub repo and push over SSH:
   `ssh-keygen -t ed25519`, paste `~/.ssh/id_ed25519.pub` into GitHub, `ssh -T git@github.com`
 - `python3 -m venv venv_spacewalks`, install pandas and matplotlib, then pick the interpreter with **Python: Select Interpreter**
@@ -110,7 +110,6 @@ docker/code-server/    default VS Code settings
 docker/ssh/            GitHub SSH-over-443 config
 docker/Dockerfile      the session image
 docker/gpuemu/         the emulator (see docker/gpuemu/README.md)
-docker/workshop/       the exercises, copied to ~/gpu-training/
 ```
 
 ## Session options
@@ -182,7 +181,7 @@ password, and prints a VS Code URL. Docker is the only requirement.
 ```
 
 Everything a learner actually does inside the session behaves identically:
-`nvidia-smi`, `nvtop`, `sbatch`, `seff`, the exercises, PyTorch, OOM errors. What it
+`nvidia-smi`, `nvtop`, `sbatch`, `seff`, PyTorch, OOM errors. What it
 does not reproduce is the Open OnDemand wrapper — no login, no k8s, no NFS
 home directories, no LDAP — so `form.yml`, `submit.yml.erb` and
 `template/script.sh.erb` are only exercised by an actual deployment. That
@@ -301,8 +300,8 @@ be worse than useless.
 | Writing correct CUDA kernels — threads, blocks, shared memory, races | Anything that needs a real driver or real device code |
 
 **The single rule to give learners: no timing measured in this environment
-means anything about GPU performance.** The session banner, the workshop
-README and the exercise scripts all say so, in those words. Please do
+means anything about GPU performance.** The session banner and the
+connect page both say so. Please do
 not remove those notices — an emulator this convincing is only safe to use if
 it is loud about what it is.
 
@@ -357,7 +356,7 @@ is a large part of what a GPU workshop is for, and an emulator with infinite
 memory would quietly teach the opposite.
 
 That capacity defaults to **200 MB per card**, not the board's real size — see
-[Session options](#session-options). A small card is what makes the exercise
+[Session options](#session-options). A small card is what makes out-of-memory exercises
 affordable: filling a real 24 GB card would cost 24 GB of host RAM per session,
 and the node holds five cards.
 
@@ -383,10 +382,6 @@ where learners write GPU code and get genuinely correct GPU behaviour back,
 including the bugs — remove a `syncthreads` and the answer goes wrong for the
 right reason. It is slow, so keep problem sizes small.
 
-See `docker/workshop/supplementary/cuda_kernel.py`. The main workshop does
-not cover this: it is written for researchers running GPU software, not for
-people writing GPU kernels.
-
 ### Batch jobs
 
 `gpuemu/slurm.py` provides `sbatch`, `squeue`, `scancel`, `sinfo`, `sacct`,
@@ -399,8 +394,7 @@ The detail that earns its place: **a job that did not request a GPU is started
 with `CUDA_VISIBLE_DEVICES` empty**, so it genuinely cannot see the device and
 `nvidia-smi` inside it fails. Forgetting `--gpus-per-node` therefore produces
 the same baffling symptom here as it does on Mahuika, which is exactly the
-lesson. `docker/workshop/01_requesting_a_gpu/forgot-the-gpu.sl` is that
-mistake, on purpose.
+lesson.
 
 It is a teaching scaffold, not Slurm: one node, first-come-first-served, no
 fair-share, no backfill, no accounting database.
